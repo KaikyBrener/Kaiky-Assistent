@@ -12,9 +12,10 @@ import ajuda from './central/ajuda.js';
 import painel from './central/painel.js';
 import tarefa from './tarefas/tarefa.js';
 import github from './projetos/github.js';
+import bug from './projetos/bug.js';
 import { isOwnerOnly } from '../services/authService.js';
 
-export const commands = [ping, ajuda, painel, tarefa, github];
+export const commands = [ping, ajuda, painel, tarefa, bug, github];
 
 /** Mapa nome → comando, para achar o comando em O(1) a cada interação. */
 const byName = new Map(commands.map((command) => [command.data.name, command]));

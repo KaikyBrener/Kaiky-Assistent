@@ -14,15 +14,26 @@
   // Variáveis NÃO secretas. Segredos (token, chave pública, IDs) ficam
   // em .dev.vars (local) e em `wrangler secret put` (produção).
   "vars": {
-    "APP_NAME": "Kaiky Assistant"
+    "APP_NAME": "Kaiky Assistant",
+    // Usuário do GitHub consultado pelo /github (nome público, não é segredo).
+    "GITHUB_USERNAME": "KaikyBrener"
   },
 
   // Segredos que o Worker PRECISA ter. Com esta lista:
   //  - `wrangler deploy` falha com erro claro se algum não estiver configurado;
   //  - `wrangler dev` carrega do .dev.vars SÓ estes nomes (o DISCORD_TOKEN,
   //    usado apenas pelo script de registro, não entra no Worker local).
+  //  DISCORD_WEBHOOK_URL: webhook do canal #kaiky (lembretes e relatório).
+  //  GITHUB_TOKEN: token fine-grained SOMENTE LEITURA (Metadata + Issues).
   "secrets": {
-    "required": ["DISCORD_PUBLIC_KEY", "OWNER_ID"]
+    "required": ["DISCORD_PUBLIC_KEY", "OWNER_ID", "DISCORD_WEBHOOK_URL", "GITHUB_TOKEN"]
+  },
+
+  // Cron Trigger (sempre em UTC): a cada 5 minutos verifica lembretes e,
+  // a partir das 08:00 de Brasília, envia o relatório diário (uma vez por dia).
+  // Plano gratuito: até 5 Cron Triggers por conta — usamos 1.
+  "triggers": {
+    "crons": ["*/5 * * * *"]
   },
 
   // Logs e traces no painel da Cloudflare. Plano gratuito: 0,5 GB/dia de
@@ -46,6 +57,4 @@
       "migrations_dir": "migrations"
     }
   ]
-
-  // FASE 3: aqui entrarão os Cron Triggers ("triggers": { "crons": [...] }).
 }

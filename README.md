@@ -5,7 +5,10 @@ Assistente pessoal no Discord, hospedado de graça no **Cloudflare Workers**, us
 **Status:**
 - **FASE 1 (Fundação):** concluída e validada no Discord real. Endpoint HTTP, validação Ed25519 e `/ping`.
 - **Auditoria técnica:** aplicada. Ver [`docs/AUDITORIA.md`](docs/AUDITORIA.md).
-- **FASE 2 (Banco de dados):** D1 e `/tarefa criar|listar|concluir|excluir`, com anti-duplicidade. Para ativar, siga a [seção 6](#6-fase-2-ativar-o-banco-d1).
+- **FASE 2 (Banco de dados):** concluída e validada no Discord real. D1 e `/tarefa`, com anti-duplicidade.
+- **FASE 3 (Automações):** prazo nas tarefas, lembretes e relatório diário às 08:00 no canal **#kaiky**, via Cron.
+- **FASE 4 (Expansão):** `/ajuda`, `/painel` e `/github` (somente leitura).
+- **Para ativar as FASES 3 e 4**, siga a [seção 7](#7-fases-3-e-4-ativar-automações-e-github).
 
 ---
 
@@ -62,17 +65,30 @@ kaiky-assistant/
 │   ├── events/
 │   │   └── interactionHandler.js # Roteia, checa permissão, trata erros, adia comandos
 │   ├── discord/options.js        # Lê subcomandos e opções preenchidas pelo usuário
+│   ├── discord/webhook.js        # Envia mensagens ao #kaiky (lembretes e relatório)
 │   ├── commands/
 │   │   ├── index.js              # Lista única de comandos (Worker + registro)
 │   │   ├── central/ping.js       # /ping
-│   │   └── tarefas/tarefa.js     # /tarefa criar|listar|concluir|excluir
+│   │   ├── central/ajuda.js      # /ajuda (gerada a partir da lista de comandos)
+│   │   ├── central/painel.js     # /painel
+│   │   ├── tarefas/tarefa.js     # /tarefa criar|listar|concluir|excluir
+│   │   └── projetos/github.js    # /github repos|issues|atividade (somente leitura)
 │   ├── services/
 │   │   ├── authService.js        # Quem é o usuário? É o proprietário?
 │   │   ├── logger.js             # Logs em JSON com lista permitida de campos
-│   │   └── tarefaService.js      # Regras e validação das tarefas
+│   │   ├── tarefaService.js      # Regras e validação das tarefas (inclui prazo)
+│   │   ├── tarefaFormat.js       # Como uma tarefa aparece no Discord
+│   │   ├── dateTime.js           # Fuso America/Sao_Paulo (conversões de data)
+│   │   ├── resumoService.js      # Textos do relatório, do painel e dos lembretes
+│   │   └── githubService.js      # API do GitHub — só GET
 │   ├── database/
-│   │   └── tarefasRepository.js  # SQL das tarefas (D1)
-│   └── jobs/                     # FASE 3 (Cron)
+│   │   ├── tarefasRepository.js       # SQL das tarefas (D1)
+│   │   ├── notificacoesRepository.js  # Anti-duplicidade das notificações
+│   │   └── estatisticasRepository.js  # Números do relatório e do painel
+│   └── jobs/
+│       ├── index.js              # Chamado pelo Cron a cada 5 minutos
+│       ├── lembretes.js          # Lembretes de prazo
+│       └── relatorioDiario.js    # Relatório das 08:00
 ├── scripts/
 │   ├── register-commands.js      # Envia os comandos ao Discord (com plano e confirmação)
 │   └── lib/
@@ -80,12 +96,14 @@ kaiky-assistant/
 │       └── signing.js            # Gera chaves/assinaturas DE TESTE
 ├── test/
 │   ├── *.test.js                 # Testes rápidos no Node (npm test)
+│   ├── helpers/d1.js             # D1 local real para testes (getPlatformProxy)
 │   └── runtime/*.runtime.js      # Testes no runtime real da Cloudflare (npm run test:runtime)
 ├── docs/
 │   ├── AUDITORIA.md              # Achados da auditoria e correções
 │   └── idempotencia-fase2.md     # Projeto anti-duplicidade para a FASE 2
 ├── migrations/
-│   └── 0001_criar_tarefas.sql    # Estrutura da tabela de tarefas
+│   ├── 0001_criar_tarefas.sql            # Tabela de tarefas
+│   └── 0002_prazos_e_notificacoes.sql    # Prazo + controle de notificações
 ├── wrangler.jsonc                # Configuração do Worker
 ├── .dev.vars.example             # Modelo dos segredos locais
 └── .gitignore
@@ -281,7 +299,85 @@ Cada tarefa guarda o ID da interação do Discord que a criou, numa coluna `UNIQ
 
 ---
 
-## 7. Segurança aplicada
+## 7. FASES 3 e 4: ativar automações e GitHub
+
+O código está pronto e testado. Faltam **duas credenciais suas** e uma migration. Faça **nesta ordem**: o `wrangler.jsonc` exige os novos segredos, então o deploy falha de propósito se eles não existirem.
+
+### 7.1 Webhook do canal #kaiky
+1. No seu servidor, crie um canal de texto **privado** chamado `#kaiky`.
+2. Abra **⚙️ Editar canal → Integrações → Webhooks → Novo webhook** e dê o nome "Kaiky Assistant".
+3. Clique em **Copiar URL do webhook**. Ela começa com `https://discord.com/api/webhooks/...`.
+
+**A URL é um segredo**: quem a tiver consegue postar no canal. Se ela vazar, apague o webhook e crie outro.
+
+### 7.2 Token do GitHub (somente leitura)
+Em github.com → **Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token**:
+
+| Campo | Valor |
+|---|---|
+| Token name | `kaiky-assistant` |
+| Expiration | 90 dias (o `/github` avisa quando expirar) |
+| Resource owner | **KaikyBrener** (sua conta pessoal) |
+| Repository access | **All repositories** |
+| Repository permissions → **Metadata** | **Read-only** (obrigatória; já vem marcada) |
+| Repository permissions → **Issues** | **Read-only** |
+| Account permissions → **Events** | **Read-only** (opcional: inclui atividade de repos privados) |
+| Todo o resto | **No access** |
+
+Não marque nenhuma permissão de escrita. Mesmo que marcasse, o código só faz requisições `GET`.
+
+### 7.3 Segredos na Cloudflare (antes do merge)
+```powershell
+npx wrangler secret put DISCORD_WEBHOOK_URL   # cole a URL do webhook
+npx wrangler secret put GITHUB_TOKEN          # cole o token do GitHub
+npx wrangler secret list                      # devem aparecer 4 segredos
+```
+
+### 7.4 Migration 0002 no banco real
+```powershell
+git fetch
+git checkout fase-3-4
+npx wrangler d1 migrations apply kaiky-assistant-db --remote
+```
+Responda `y`. Deve aparecer ✅ ao lado de `0002_prazos_e_notificacoes.sql`.
+
+### 7.5 Publicar e registrar
+```powershell
+git checkout main
+git pull
+git merge fase-3-4
+git push            # deploy automático (inclui o Cron de 5 em 5 minutos)
+npm run register    # depois que o deploy terminar
+```
+O plano do registro deve mostrar `+ criar` para `/ajuda`, `/painel` e `/github`, e `~ atualizar` para `/tarefa`, que ganhou a opção `prazo`.
+
+A Cloudflare informa que mudanças no Cron podem levar **até 15 minutos** para valer.
+
+### 7.6 Testar
+```
+/ajuda
+/tarefa criar titulo:Teste de lembrete prazo:DD/MM/AAAA HH:MM   ← daqui a ~30 minutos
+/painel
+/github repos
+/github issues
+/github atividade
+```
+- O lembrete chega no `#kaiky` em até 5 minutos.
+- O relatório chega todo dia a partir das 08:00.
+- Os logs do Cron aparecem como `"event":"scheduled"` em `npx wrangler tail`.
+
+### Como as automações funcionam
+- **Cron:** roda `*/5 * * * *`, sempre em UTC. O código converte tudo para **America/Sao_Paulo**.
+- **Lembrete:** sai quando falta até **1 hora** para o prazo, ou se a tarefa já venceu. Cada tarefa recebe **um** lembrete, e tarefas concluídas não recebem. Vários lembretes da mesma execução vão numa mensagem só.
+- **Relatório diário:** sai na primeira execução a partir das **08:00**, uma vez por dia, com pendentes, atrasadas, as que vencem hoje e o resumo da semana. Sem pendências, a mensagem é "✅ Tudo em dia!".
+- **Anti-duplicidade:** antes de enviar, o Cron **reserva** uma chave única na tabela `notificacoes` (`lembrete:<id>` ou `relatorio:<data>`).
+  - Se outra execução já reservou, a mensagem não sai de novo.
+  - Se o Discord falhar, a reserva é desfeita e a próxima execução tenta de novo.
+  - Limite conhecido: se o Worker cair exatamente entre a reserva e o envio, aquele lembrete se perde. A escolha foi nunca duplicar.
+
+---
+
+## 8. Segurança aplicada
 
 - O corpo é lido com **limite real de 64 KB** (stream), mesmo sem `Content-Length`. Acima disso: 413.
 - Assinatura Ed25519 conferida sobre os **bytes exatos** recebidos, **antes** de interpretar o JSON. Falhas: 401.
@@ -292,17 +388,22 @@ Cada tarefa guarda o ID da interação do Discord que a criou, numa coluna `UNIQ
 - Erros internos ficam no log; o usuário recebe só uma mensagem genérica.
 - Respostas com `allowed_mentions: { parse: [] }`: o bot nunca marca @everyone por acidente.
 - Banco: valores do usuário entram só por `.bind(...)`, o que impede SQL injection (há teste com `DROP TABLE` no título). Título e ID são validados no servidor, e a mesma interação nunca cria duas tarefas.
+- Notificações saem por um **webhook** (só posta em um canal). O token do bot nunca entra no Worker, e a URL do webhook nunca aparece em log.
+- GitHub: token fine-grained **somente leitura**, e o código só faz `GET`. O token nunca aparece em logs, erros ou respostas. Nomes de repositório são validados antes de qualquer chamada.
 
 **Risco conhecido:** a URL `workers.dev` é pública. Alguém poderia gastar a cota de 100 mil requisições/dia com chamadas inválidas. Mitigar isso exige regras de WAF num domínio próprio (ou seja, mexer em DNS), o que está fora do escopo. Detalhes em `docs/AUDITORIA.md`.
 
 ---
 
-## 8. Próximas fases
+## 9. Próximas fases
 
-- **FASE 2:** ✅ implementada. Falta só ativá-la na sua conta (seção 6).
-- **FASE 3:** um único Cron Trigger (limite de 5 por conta) para lembretes e relatório diário.
-- **FASE 4:** GitHub, e-mail próprio, painel, IA (usando `deferred: true`).
+- **FASE 2:** ✅ ativa.
+- **FASE 3:** ✅ implementada. Ative pela seção 7.
+- **FASE 4:** ✅ `/ajuda`, `/painel` e `/github` implementados. Ative pela seção 7.
+- **Futuro: IA (Workers AI).** Deixada para depois, como você decidiu. O `deferred: true` já está pronto para respostas demoradas.
+- **Documentado, não implementado: e-mail em domínio próprio.** Receber ou enviar e-mail num domínio seu (pelo Email Routing da Cloudflare, por exemplo) exige configurar registros **MX/TXT no DNS** do domínio. Mexer em DNS está proibido neste projeto, então nada foi feito. Se um dia você quiser, o caminho é: um domínio **pessoal** (nunca o da empresa) → Email Routing → um handler `email` no Worker.
 
 Documentação usada:
 - Discord: [Interactions](https://docs.discord.com/developers/interactions/overview) · [Receiving and Responding](https://docs.discord.com/developers/interactions/receiving-and-responding) · [Application Commands](https://docs.discord.com/developers/interactions/application-commands)
-- Cloudflare: [Workers Limits](https://developers.cloudflare.com/workers/platform/limits/) · [Web Crypto](https://developers.cloudflare.com/workers/runtime-apis/web-crypto/) · [Secrets](https://developers.cloudflare.com/workers/configuration/secrets/) · [Test harness](https://developers.cloudflare.com/workers/testing/test-harness/) · [Traces](https://developers.cloudflare.com/workers/observability/traces/) · [D1 limits](https://developers.cloudflare.com/d1/platform/limits/)
+- Cloudflare: [Workers Limits](https://developers.cloudflare.com/workers/platform/limits/) · [Web Crypto](https://developers.cloudflare.com/workers/runtime-apis/web-crypto/) · [Secrets](https://developers.cloudflare.com/workers/configuration/secrets/) · [Test harness](https://developers.cloudflare.com/workers/testing/test-harness/) · [Traces](https://developers.cloudflare.com/workers/observability/traces/) · [D1 limits](https://developers.cloudflare.com/d1/platform/limits/) · [Cron Triggers](https://developers.cloudflare.com/workers/configuration/cron-triggers/)
+- GitHub: [Repos](https://docs.github.com/en/rest/repos/repos) · [Issues](https://docs.github.com/en/rest/issues/issues) · [Events](https://docs.github.com/en/rest/activity/events)

@@ -24,3 +24,6 @@ DISCORD_WEBHOOK_URL=""
 
 # FASE 4: token fine-grained do GitHub, SOMENTE LEITURA (Metadata: Read + Issues: Read)
 GITHUB_TOKEN=""
+
+# Opcional: webhook do canal #dashboard (pendências atualizadas a cada 5 minutos)
+DISCORD_DASHBOARD_WEBHOOK_URL=""

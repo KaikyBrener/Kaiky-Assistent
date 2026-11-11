@@ -9,6 +9,7 @@ Assistente pessoal no Discord, hospedado de graça no **Cloudflare Workers**, us
 - **FASE 3 (Automações):** prazo nas tarefas, lembretes e relatório diário às 08:00 no canal **#kaiky**, via Cron.
 - **FASE 4 (Expansão):** `/ajuda`, `/painel` e `/github` (somente leitura).
 - **Para ativar as FASES 3 e 4**, siga a [seção 7](#7-fases-3-e-4-ativar-automações-e-github).
+- **Bugs, descrições longas e #dashboard:** `/bug`, tipo e descrição nas tarefas, e o canal #dashboard. Para ativar, siga a [seção 8](#8-bugs-descrições-e-dashboard-ativar).
 
 ---
 
@@ -65,13 +66,15 @@ kaiky-assistant/
 │   ├── events/
 │   │   └── interactionHandler.js # Roteia, checa permissão, trata erros, adia comandos
 │   ├── discord/options.js        # Lê subcomandos e opções preenchidas pelo usuário
-│   ├── discord/webhook.js        # Envia mensagens ao #kaiky (lembretes e relatório)
+│   ├── discord/webhook.js        # Envia/edita mensagens por webhook (#kaiky e #dashboard)
+│   ├── discord/modal.js          # Formulários (modais) para textos longos
 │   ├── commands/
 │   │   ├── index.js              # Lista única de comandos (Worker + registro)
 │   │   ├── central/ping.js       # /ping
 │   │   ├── central/ajuda.js      # /ajuda (gerada a partir da lista de comandos)
 │   │   ├── central/painel.js     # /painel
 │   │   ├── tarefas/tarefa.js     # /tarefa criar|listar|concluir|excluir
+│   │   ├── projetos/bug.js       # /bug registrar|resolver|reabrir|ver|listar|buscar
 │   │   └── projetos/github.js    # /github repos|issues|atividade (somente leitura)
 │   ├── services/
 │   │   ├── authService.js        # Quem é o usuário? É o proprietário?
@@ -80,15 +83,19 @@ kaiky-assistant/
 │   │   ├── tarefaFormat.js       # Como uma tarefa aparece no Discord
 │   │   ├── dateTime.js           # Fuso America/Sao_Paulo (conversões de data)
 │   │   ├── resumoService.js      # Textos do relatório, do painel e dos lembretes
+│   │   ├── bugService.js         # Regras, validação e formatação dos bugs
 │   │   └── githubService.js      # API do GitHub — só GET
 │   ├── database/
 │   │   ├── tarefasRepository.js       # SQL das tarefas (D1)
 │   │   ├── notificacoesRepository.js  # Anti-duplicidade das notificações
-│   │   └── estatisticasRepository.js  # Números do relatório e do painel
+│   │   ├── estatisticasRepository.js  # Números do relatório e do painel
+│   │   ├── bugsRepository.js          # SQL dos bugs
+│   │   └── estadoRepository.js        # Valores guardados entre execuções (ID do #dashboard)
 │   └── jobs/
 │       ├── index.js              # Chamado pelo Cron a cada 5 minutos
 │       ├── lembretes.js          # Lembretes de prazo
-│       └── relatorioDiario.js    # Relatório das 08:00
+│       ├── relatorioDiario.js    # Relatório das 08:00
+│       └── dashboard.js          # Mensagem fixa do #dashboard
 ├── scripts/
 │   ├── register-commands.js      # Envia os comandos ao Discord (com plano e confirmação)
 │   └── lib/
@@ -103,7 +110,8 @@ kaiky-assistant/
 │   └── idempotencia-fase2.md     # Projeto anti-duplicidade para a FASE 2
 ├── migrations/
 │   ├── 0001_criar_tarefas.sql            # Tabela de tarefas
-│   └── 0002_prazos_e_notificacoes.sql    # Prazo + controle de notificações
+│   ├── 0002_prazos_e_notificacoes.sql    # Prazo + controle de notificações
+│   └── 0003_tipos_descricoes_bugs_dashboard.sql  # Tipo/descrição, bugs e estado
 ├── wrangler.jsonc                # Configuração do Worker
 ├── .dev.vars.example             # Modelo dos segredos locais
 └── .gitignore
@@ -377,7 +385,71 @@ A Cloudflare informa que mudanças no Cron podem levar **até 15 minutos** para 
 
 ---
 
-## 8. Segurança aplicada
+## 8. Bugs, descrições e #dashboard: ativar
+
+### 8.1 Migration 0003 no banco real (ANTES do merge)
+O código novo usa as colunas `tipo` e `descricao` e as tabelas `bugs` e `estado`. Sem a migration, o `/tarefa` dá erro.
+```powershell
+git fetch
+git checkout tarefas-detalhes-dashboard
+npx wrangler d1 migrations apply kaiky-assistant-db --remote
+```
+Responda `y`. Deve aparecer ✅ ao lado de `0003_tipos_descricoes_bugs_dashboard.sql`.
+
+### 8.2 Canal #dashboard (opcional)
+1. Crie um canal de texto **privado** chamado `#dashboard`.
+2. **⚙️ Editar canal → Integrações → Webhooks → Novo webhook → Copiar URL**.
+3. Salve como segredo:
+   ```powershell
+   npx wrangler secret put DISCORD_DASHBOARD_WEBHOOK_URL
+   ```
+
+Esse segredo é **opcional**, de propósito: sem ele, o deploy funciona e o #dashboard só não é atualizado.
+
+### 8.3 Publicar e registrar
+```powershell
+git checkout main
+git pull
+git merge tarefas-detalhes-dashboard
+git push
+npm run register      # depois que o deploy terminar
+```
+O plano deve mostrar `+ criar /bug` e `~ atualizar /tarefa`.
+
+### Como usar
+**Tarefa com descrição longa**
+```
+/tarefa criar titulo:Revisar PR 879 tipo:melhoria contexto:profissional descrever:True
+```
+- O formulário abre na hora. Cole o texto de várias linhas e clique em **Enviar**.
+- `/tarefa ver id:N` mostra a tarefa completa.
+- `/tarefa descrever id:N` edita a descrição (o formulário já vem preenchido).
+
+**Documentar um bug**
+```
+/bug registrar sistema:Horus
+```
+- Abre um formulário com título, sistema, "o que acontece?" e "como reproduzir".
+```
+/bug resolver id:N
+```
+- Abre um formulário com causa, "como foi resolvido" (pode colar a descrição do PR) e PR/link.
+- Os outros comandos:
+  - `/bug ver id:N` mostra o problema e a resolução;
+  - `/bug listar` lista os abertos;
+  - `/bug listar status:resolvidos sistema:Horus` filtra por status e sistema;
+  - `/bug buscar termo:col-xs` procura no texto de todos os bugs;
+  - `/bug reabrir id:N` reabre um bug que voltou.
+
+**#dashboard**
+- Uma mensagem fixa com as tarefas pendentes (atrasadas primeiro) e os bugs abertos.
+- O Cron **edita a mesma mensagem** a cada 5 minutos. Se você apagar a mensagem, ele cria outra.
+
+Uma observação sobre dados de trabalho: bugs e descrições de PRs de sistemas da empresa ficam no **seu** D1 e no **seu** Discord. Confira se a política da empresa permite guardar esse tipo de informação fora dos sistemas dela.
+
+---
+
+## 9. Segurança aplicada
 
 - O corpo é lido com **limite real de 64 KB** (stream), mesmo sem `Content-Length`. Acima disso: 413.
 - Assinatura Ed25519 conferida sobre os **bytes exatos** recebidos, **antes** de interpretar o JSON. Falhas: 401.
@@ -389,17 +461,19 @@ A Cloudflare informa que mudanças no Cron podem levar **até 15 minutos** para 
 - Respostas com `allowed_mentions: { parse: [] }`: o bot nunca marca @everyone por acidente.
 - Banco: valores do usuário entram só por `.bind(...)`, o que impede SQL injection (há teste com `DROP TABLE` no título). Título e ID são validados no servidor, e a mesma interação nunca cria duas tarefas.
 - Notificações saem por um **webhook** (só posta em um canal). O token do bot nunca entra no Worker, e a URL do webhook nunca aparece em log.
+- Formulários (modais) passam pelas mesmas regras dos comandos: assinatura, proprietário e validação. O `custom_id` é conferido por formato antes de qualquer ação.
 - GitHub: token fine-grained **somente leitura**, e o código só faz `GET`. O token nunca aparece em logs, erros ou respostas. Nomes de repositório são validados antes de qualquer chamada.
 
 **Risco conhecido:** a URL `workers.dev` é pública. Alguém poderia gastar a cota de 100 mil requisições/dia com chamadas inválidas. Mitigar isso exige regras de WAF num domínio próprio (ou seja, mexer em DNS), o que está fora do escopo. Detalhes em `docs/AUDITORIA.md`.
 
 ---
 
-## 9. Próximas fases
+## 10. Próximas fases
 
 - **FASE 2:** ✅ ativa.
-- **FASE 3:** ✅ implementada. Ative pela seção 7.
-- **FASE 4:** ✅ `/ajuda`, `/painel` e `/github` implementados. Ative pela seção 7.
+- **FASE 3:** ✅ implementada (ativação: seção 7).
+- **FASE 4:** ✅ `/ajuda`, `/painel` e `/github` implementados (ativação: seção 7).
+- **Bugs, descrições e #dashboard:** ✅ implementados. Ative pela seção 8.
 - **Futuro: IA (Workers AI).** Deixada para depois, como você decidiu. O `deferred: true` já está pronto para respostas demoradas.
 - **Documentado, não implementado: e-mail em domínio próprio.** Receber ou enviar e-mail num domínio seu (pelo Email Routing da Cloudflare, por exemplo) exige configurar registros **MX/TXT no DNS** do domínio. Mexer em DNS está proibido neste projeto, então nada foi feito. Se um dia você quiser, o caminho é: um domínio **pessoal** (nunca o da empresa) → Email Routing → um handler `email` no Worker.
 

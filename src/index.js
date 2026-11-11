@@ -5,10 +5,11 @@
 // client.login()): o Worker "acorda", responde e termina.
 //
 // Fluxo de uma interação:
-//   Discord → POST / → valida assinatura → interpreta JSON → handler → resposta
+//   Discord → POST / → lê corpo (máx. 64 KB) → valida assinatura → JSON → handler → resposta
 
 import { getConfig, ConfigError } from './config/env.js';
-import { verifyDiscordRequest } from './discord/verifySignature.js';
+import { verifyDiscordSignature } from './discord/verifySignature.js';
+import { readBodyWithLimit, BodyTooLargeError } from './discord/readBody.js';
 import { handleInteraction } from './events/interactionHandler.js';
 import { json, text } from './discord/responses.js';
 
@@ -45,22 +46,28 @@ export default {
       throw error;
     }
 
-    const contentLength = Number(request.headers.get('Content-Length') ?? 0);
-    if (contentLength > MAX_BODY_BYTES) return text('Requisição muito grande.', 413);
+    // 1) Lê o corpo com limite real de tamanho (mesmo sem Content-Length).
+    let bodyBytes;
+    try {
+      bodyBytes = await readBodyWithLimit(request, MAX_BODY_BYTES);
+    } catch (error) {
+      if (error instanceof BodyTooLargeError) return text('Requisição muito grande.', 413);
+      throw error;
+    }
 
-    // 1) Segurança primeiro: nada é processado antes de validar a assinatura.
-    const { isValid, body } = await verifyDiscordRequest(request, config.publicKey);
+    // 2) Segurança primeiro: nada é interpretado antes de validar a assinatura.
+    const isValid = await verifyDiscordSignature(request.headers, bodyBytes, config.publicKey);
     if (!isValid) return text('Assinatura inválida.', 401);
 
-    // 2) Só agora interpretamos o JSON.
+    // 3) Só agora transformamos os bytes em texto e depois em JSON.
     let interaction;
     try {
-      interaction = JSON.parse(body);
+      interaction = JSON.parse(new TextDecoder().decode(bodyBytes));
     } catch {
       return json({ error: 'JSON inválido.' }, 400);
     }
 
-    // 3) Encaminha para o roteador de interações.
+    // 4) Encaminha para o roteador de interações.
     try {
       return await handleInteraction(interaction, { config, env, ctx });
     } catch (error) {

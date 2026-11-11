@@ -5,15 +5,11 @@
 // requisição com a chave PRIVADA dele; nós conferimos com a chave PÚBLICA
 // da aplicação. Se a conta não fechar, recusamos com 401.
 //
-// O que é assinado: timestamp + corpo bruto (exatamente os bytes recebidos).
+// O que é assinado: timestamp + corpo, exatamente os BYTES recebidos.
 // Usamos a Web Crypto nativa do Workers (`crypto.subtle`) com o algoritmo
-// "Ed25519" — sem bibliotecas externas.
+// "Ed25519": sem bibliotecas externas.
 
 const encoder = new TextEncoder();
-
-/** Cache da chave importada: importar custa CPU, e a chave não muda. */
-let cachedKey = null;
-let cachedKeyHex = null;
 
 /**
  * Converte texto hexadecimal ("a1b2...") em bytes.
@@ -30,45 +26,39 @@ export function hexToBytes(hex, expectedBytes) {
   return bytes;
 }
 
-async function getPublicKey(publicKeyHex) {
-  if (cachedKey && cachedKeyHex === publicKeyHex) return cachedKey;
-  const keyBytes = hexToBytes(publicKeyHex, 32);
-  if (!keyBytes) throw new Error('Chave pública inválida.');
-  cachedKey = await crypto.subtle.importKey('raw', keyBytes, { name: 'Ed25519' }, false, ['verify']);
-  cachedKeyHex = publicKeyHex;
-  return cachedKey;
+/** Junta os bytes do timestamp com os bytes do corpo: é isso que o Discord assina. */
+function signedMessage(timestamp, bodyBytes) {
+  const timestampBytes = encoder.encode(timestamp);
+  const message = new Uint8Array(timestampBytes.byteLength + bodyBytes.byteLength);
+  message.set(timestampBytes, 0);
+  message.set(bodyBytes, timestampBytes.byteLength);
+  return message;
 }
 
 /**
- * Lê o corpo da requisição e verifica a assinatura.
- * O corpo só pode ser lido uma vez, por isso devolvemos o texto junto.
+ * Verifica a assinatura de uma requisição do Discord.
  *
- * @param {Request} request
- * @param {string} publicKeyHex
- * @returns {Promise<{ isValid: boolean, body: string }>}
+ * @param {Headers} headers Cabeçalhos da requisição.
+ * @param {Uint8Array} bodyBytes Corpo exatamente como chegou (ver readBody.js).
+ * @param {string} publicKeyHex Chave pública da aplicação (64 caracteres hex).
+ * @returns {Promise<boolean>}
  */
-export async function verifyDiscordRequest(request, publicKeyHex) {
-  const signatureHex = request.headers.get('X-Signature-Ed25519');
-  const timestamp = request.headers.get('X-Signature-Timestamp');
-  const body = await request.text();
-
-  if (!signatureHex || !timestamp) return { isValid: false, body };
+export async function verifyDiscordSignature(headers, bodyBytes, publicKeyHex) {
+  const signatureHex = headers.get('X-Signature-Ed25519');
+  const timestamp = headers.get('X-Signature-Timestamp');
+  if (!signatureHex || !timestamp) return false;
 
   const signature = hexToBytes(signatureHex, 64); // assinatura Ed25519 = 64 bytes
-  if (!signature) return { isValid: false, body };
+  const keyBytes = hexToBytes(publicKeyHex, 32); // chave pública Ed25519 = 32 bytes
+  if (!signature || !keyBytes) return false;
 
   try {
-    const key = await getPublicKey(publicKeyHex);
-    const isValid = await crypto.subtle.verify(
-      'Ed25519',
-      key,
-      signature,
-      encoder.encode(timestamp + body),
-    );
-    return { isValid, body };
-  } catch (error) {
+    // Importar a chave custa microssegundos; por isso não guardamos cache em
+    // variável global (estado global é compartilhado entre requisições).
+    const key = await crypto.subtle.importKey('raw', keyBytes, { name: 'Ed25519' }, false, ['verify']);
+    return await crypto.subtle.verify('Ed25519', key, signature, signedMessage(timestamp, bodyBytes));
+  } catch {
     // Qualquer falha na verificação conta como assinatura inválida.
-    console.error('Falha ao verificar assinatura:', error?.message);
-    return { isValid: false, body };
+    return false;
   }
 }

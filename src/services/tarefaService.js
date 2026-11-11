@@ -8,7 +8,9 @@ import * as repo from '../database/tarefasRepository.js';
 import { parsePrazo } from './dateTime.js';
 
 export const TITULO_MAX = 200;
+export const TEXTO_LONGO_MAX = 4000;
 export const CONTEXTOS = Object.freeze(['pessoal', 'profissional']);
+export const TIPOS = Object.freeze(['tarefa', 'melhoria', 'estudo', 'reuniao']);
 
 export class ValidationError extends Error {
   constructor(message) {
@@ -33,6 +35,26 @@ export function validarContexto(valor, padrao = 'pessoal') {
   if (valor === undefined || valor === null) return padrao;
   if (!CONTEXTOS.includes(valor)) throw new ValidationError('Contexto deve ser "pessoal" ou "profissional".');
   return valor;
+}
+
+export function validarTipo(valor) {
+  if (valor === undefined || valor === null) return 'tarefa';
+  if (!TIPOS.includes(valor)) throw new ValidationError(`Tipo deve ser: ${TIPOS.join(', ')}.`);
+  return valor;
+}
+
+/**
+ * Texto longo de várias linhas (descrições, causa, solução).
+ * Mantém as quebras de linha, tira espaços sobrando no fim.
+ * Vazio → null (apaga o campo).
+ */
+export function validarTextoLongo(valor, nome = 'O texto', max = TEXTO_LONGO_MAX) {
+  if (valor === undefined || valor === null) return null;
+  if (typeof valor !== 'string') throw new ValidationError(`${nome} é inválido.`);
+  const texto = valor.replace(/\r\n?/g, '\n').replace(/[ \t]+$/gm, '').trim();
+  if (!texto) return null;
+  if (texto.length > max) throw new ValidationError(`${nome} pode ter no máximo ${max} caracteres.`);
+  return texto;
 }
 
 export function validarId(valor) {
@@ -60,14 +82,26 @@ export function validarPrazo(valor, agora = Date.now()) {
   return prazo;
 }
 
-export async function criar(db, { titulo, contexto, prazo, interactionId, agora = Date.now() }) {
+export async function criar(db, { titulo, contexto, prazo, tipo, interactionId, agora = Date.now() }) {
   if (typeof interactionId !== 'string' || !interactionId) throw new ValidationError('Interação sem ID.');
   return repo.criarTarefa(db, {
     titulo: validarTitulo(titulo),
     contexto: validarContexto(contexto),
     prazo: validarPrazo(prazo, agora),
+    tipo: validarTipo(tipo),
     interactionId,
     agora,
+  });
+}
+
+export async function obter(db, { id }) {
+  return repo.obterTarefa(db, { id: validarId(id) });
+}
+
+export async function descrever(db, { id, descricao }) {
+  return repo.atualizarDescricao(db, {
+    id: validarId(id),
+    descricao: validarTextoLongo(descricao, 'A descrição'),
   });
 }
 

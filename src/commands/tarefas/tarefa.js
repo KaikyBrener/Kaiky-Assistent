@@ -10,10 +10,32 @@ import { reply } from '../../discord/responses.js';
 import { readSubcommand } from '../../discord/options.js';
 import { logger } from '../../services/logger.js';
 import * as tarefas from '../../services/tarefaService.js';
-import { escapeMarkdown, formatarTarefa } from '../../services/tarefaFormat.js';
+import { escapeMarkdown, formatarTarefa, detalhesTarefa } from '../../services/tarefaFormat.js';
 import { formatDateTime } from '../../services/dateTime.js';
+import { replyEmbed } from '../../discord/responses.js';
+import { modalResponse, readModalValues, TextStyle } from '../../discord/modal.js';
 
 const contextoChoices = tarefas.CONTEXTOS.map((valor) => ({ name: valor, value: valor }));
+const tipoChoices = tarefas.TIPOS.map((valor) => ({ name: valor === 'reuniao' ? 'reunião' : valor, value: valor }));
+
+/** Formulário para escrever a descrição longa (várias linhas) de uma tarefa. */
+export function formularioDescricao(tarefa) {
+  return modalResponse({
+    customId: `tarefa:descrever:${tarefa.id}`,
+    title: `Descrição da tarefa #${tarefa.id}`,
+    fields: [
+      {
+        id: 'descricao',
+        label: 'Descrição',
+        description: 'Detalhes, passos, links… Deixe vazio para apagar.',
+        style: TextStyle.PARAGRAPH,
+        required: false,
+        maxLength: tarefas.TEXTO_LONGO_MAX,
+        value: tarefa.descricao,
+      },
+    ],
+  });
+}
 
 const idOption = {
   type: OptionType.INTEGER,
@@ -41,8 +63,11 @@ const handlers = {
       titulo: values.titulo,
       contexto: values.contexto,
       prazo: values.prazo,
+      tipo: values.tipo,
       interactionId: interaction.id,
     });
+    // descrever:True → a tarefa já foi criada; agora abre o formulário da descrição.
+    if (values.descrever === true) return formularioDescricao(tarefa);
     if (repetida) return `ℹ️ Esta solicitação já tinha sido processada: ${formatarTarefa(tarefa)}`;
     const aviso = tarefa.prazo
       ? `\n⏰ Vence em ${formatDateTime(tarefa.prazo)} (horário de Brasília). Você recebe um lembrete no #kaiky até 1 hora antes.`
@@ -67,7 +92,47 @@ const handlers = {
     if (!tarefa) return `🔎 Tarefa #${values.id} não encontrada.`;
     return `🗑️ Excluída: #${tarefa.id} · ${escapeMarkdown(tarefa.titulo)}`;
   },
+
+  async ver(db, values) {
+    const tarefa = await tarefas.obter(db, { id: values.id });
+    if (!tarefa) return `🔎 Tarefa #${values.id} não encontrada.`;
+    return replyEmbed(detalhesTarefa(tarefa), { ephemeral: true });
+  },
+
+  async descrever(db, values) {
+    const tarefa = await tarefas.obter(db, { id: values.id });
+    if (!tarefa) return `🔎 Tarefa #${values.id} não encontrada.`;
+    return formularioDescricao(tarefa); // abre o formulário já com a descrição atual
+  },
 };
+
+/** Respostas dos formulários: hoje só "tarefa:descrever:<id>". */
+const modalHandlers = {
+  async descrever(db, values, id) {
+    const tarefa = await tarefas.descrever(db, { id, descricao: values.descricao });
+    if (!tarefa) return `🔎 Tarefa #${id} não encontrada.`;
+    return tarefa.descricao
+      ? `📄 Descrição salva: ${formatarTarefa(tarefa)}\nVeja com \`/tarefa ver id:${tarefa.id}\`.`
+      : `🧹 Descrição apagada: ${formatarTarefa(tarefa)}`;
+  },
+};
+
+/** Executa um handler e trata o resultado: texto vira mensagem efêmera; Response passa direto. */
+async function responder(db, run) {
+  try {
+    const resultado = await run(db);
+    return resultado instanceof Response ? resultado : reply(resultado, { ephemeral: true });
+  } catch (error) {
+    // Erro de validação é culpa da entrada: mostramos a mensagem ao usuário.
+    if (error instanceof tarefas.ValidationError) return reply(`⚠️ ${error.message}`, { ephemeral: true });
+    throw error; // outros erros: o roteador registra no log e responde de forma genérica
+  }
+}
+
+function bancoAusente() {
+  logger.error('config_invalid', { command: 'tarefa', reason: 'd1_binding_missing' });
+  return reply('⚠️ O banco de dados não está configurado.', { ephemeral: true });
+}
 
 export default {
   data: {
@@ -98,6 +163,8 @@ export default {
             description: 'Opcional. DD/MM/AAAA HH:MM ou DD/MM/AAAA (horário de Brasília).',
             max_length: 16,
           },
+          { type: OptionType.STRING, name: 'tipo', description: 'tarefa, melhoria, estudo ou reunião (padrão: tarefa).', choices: tipoChoices },
+          { type: OptionType.BOOLEAN, name: 'descrever', description: 'Abrir um formulário para escrever uma descrição longa.' },
         ],
       },
       {
@@ -111,6 +178,8 @@ export default {
       },
       { type: OptionType.SUB_COMMAND, name: 'concluir', description: 'Marca uma tarefa como concluída.', options: [idOption] },
       { type: OptionType.SUB_COMMAND, name: 'excluir', description: 'Exclui uma tarefa.', options: [idOption] },
+      { type: OptionType.SUB_COMMAND, name: 'ver', description: 'Mostra todos os detalhes, com a descrição.', options: [idOption] },
+      { type: OptionType.SUB_COMMAND, name: 'descrever', description: 'Abre o formulário da descrição longa.', options: [idOption] },
     ],
   },
 
@@ -118,19 +187,15 @@ export default {
     const sub = readSubcommand(interaction);
     const handler = sub && Object.hasOwn(handlers, sub.name) ? handlers[sub.name] : null;
     if (!handler) return reply('Subcomando não reconhecido.', { ephemeral: true });
+    if (!env?.DB) return bancoAusente();
+    return responder(env.DB, (db) => handler(db, sub.values, interaction));
+  },
 
-    const db = env?.DB;
-    if (!db) {
-      logger.error('config_invalid', { command: 'tarefa', reason: 'd1_binding_missing' });
-      return reply('⚠️ O banco de dados não está configurado.', { ephemeral: true });
-    }
-
-    try {
-      return reply(await handler(db, sub.values, interaction), { ephemeral: true });
-    } catch (error) {
-      // Erro de validação é culpa da entrada: mostramos a mensagem ao usuário.
-      if (error instanceof tarefas.ValidationError) return reply(`⚠️ ${error.message}`, { ephemeral: true });
-      throw error; // outros erros: o roteador registra no log e responde de forma genérica
-    }
+  /** Envio de formulário. `parsed` vem do custom_id, ex.: { action: 'descrever', id: 12 }. */
+  async handleModal(interaction, { env }, parsed) {
+    const handler = Object.hasOwn(modalHandlers, parsed.action) ? modalHandlers[parsed.action] : null;
+    if (!handler || parsed.id === null) return reply('Formulário não reconhecido.', { ephemeral: true });
+    if (!env?.DB) return bancoAusente();
+    return responder(env.DB, (db) => handler(db, readModalValues(interaction), parsed.id));
   },
 };

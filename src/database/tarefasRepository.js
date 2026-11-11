@@ -8,7 +8,7 @@
 //
 // `db` é o binding D1 (env.DB), configurado no wrangler.jsonc.
 
-export const COLUNAS = 'id, titulo, contexto, concluida, criada_em, concluida_em, prazo';
+export const COLUNAS = 'id, titulo, contexto, concluida, criada_em, concluida_em, prazo, tipo, descricao';
 
 /** Converte a linha do banco (0/1) para um objeto mais fácil de usar. */
 export function paraTarefa(linha) {
@@ -19,17 +19,17 @@ export function paraTarefa(linha) {
 /**
  * Cria uma tarefa. Se a mesma interação do Discord chegar de novo,
  * NÃO cria outra: devolve a tarefa já existente com `repetida: true`.
- * `prazo` é opcional (ms UTC ou null).
+ * `prazo` é opcional (ms UTC ou null); `tipo` padrão 'tarefa'.
  */
-export async function criarTarefa(db, { titulo, contexto, prazo = null, interactionId, agora }) {
+export async function criarTarefa(db, { titulo, contexto, prazo = null, tipo = 'tarefa', interactionId, agora }) {
   const criada = await db
     .prepare(
-      `INSERT INTO tarefas (titulo, contexto, prazo, criada_em, criada_por_interacao)
-       VALUES (?, ?, ?, ?, ?)
+      `INSERT INTO tarefas (titulo, contexto, prazo, tipo, criada_em, criada_por_interacao)
+       VALUES (?, ?, ?, ?, ?, ?)
        ON CONFLICT (criada_por_interacao) DO NOTHING
        RETURNING ${COLUNAS}`,
     )
-    .bind(titulo, contexto, prazo, agora, interactionId)
+    .bind(titulo, contexto, prazo, tipo, agora, interactionId)
     .first();
 
   if (criada) return { tarefa: paraTarefa(criada), repetida: false };
@@ -95,4 +95,39 @@ export async function excluirTarefa(db, { id }) {
     .bind(id)
     .first();
   return paraTarefa(excluida);
+}
+
+/** Uma tarefa pelo número. @returns {Promise<object | null>} */
+export async function obterTarefa(db, { id }) {
+  return paraTarefa(await db.prepare(`SELECT ${COLUNAS} FROM tarefas WHERE id = ?`).bind(id).first());
+}
+
+/** Troca a descrição longa (null apaga). @returns {Promise<object | null>} null se a tarefa não existe. */
+export async function atualizarDescricao(db, { id, descricao }) {
+  const linha = await db
+    .prepare(`UPDATE tarefas SET descricao = ? WHERE id = ? RETURNING ${COLUNAS}`)
+    .bind(descricao, id)
+    .first();
+  return paraTarefa(linha);
+}
+
+/** Pendentes para o #dashboard: atrasadas e com prazo primeiro, depois sem prazo. */
+export async function listarPendentesPorPrazo(db, { agora, limite = 15 }) {
+  const [lista, contagem] = await db.batch([
+    db
+      .prepare(
+        `SELECT ${COLUNAS} FROM tarefas WHERE concluida = 0
+         ORDER BY (prazo IS NULL) ASC, prazo ASC, id ASC LIMIT ?`,
+      )
+      .bind(limite),
+    db
+      .prepare(
+        `SELECT COUNT(*) AS total,
+                SUM(CASE WHEN prazo IS NOT NULL AND prazo < ? THEN 1 ELSE 0 END) AS atrasadas
+         FROM tarefas WHERE concluida = 0`,
+      )
+      .bind(agora),
+  ]);
+  const { total, atrasadas } = contagem.results[0];
+  return { tarefas: lista.results.map(paraTarefa), total, atrasadas: atrasadas ?? 0 };
 }

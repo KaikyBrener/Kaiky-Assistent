@@ -7,7 +7,9 @@ DISCORD_PUBLIC_KEY=""
 # Developer Portal > General Information > Application ID
 DISCORD_APPLICATION_ID=""
 
-# Developer Portal > Bot > Reset Token (usado só pelo script de registro de comandos)
+# Developer Portal > Bot > Reset Token
+# Usado SÓ pelo script de registro (npm run register). O Worker não recebe este
+# valor: o wrangler.jsonc lista em "secrets.required" apenas os segredos dele.
 DISCORD_TOKEN=""
 
 # Seu ID de usuário do Discord (Modo Desenvolvedor > clique direito no seu nome > Copiar ID)

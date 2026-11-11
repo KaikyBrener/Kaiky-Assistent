@@ -198,3 +198,35 @@ O endpoint `workers.dev` é público. Alguém pode gastar as **100.000 requisiç
 9. **Documentação:** README, riscos do bulk overwrite e projeto de idempotência (M3, B7).
 
 Cada etapa vira um commit próprio, com os testes rodando antes do próximo.
+
+---
+
+## Estado após as correções
+
+| Achado | Status | Commit | Evidência |
+|---|---|---|---|
+| M1 Limite de corpo | ✅ Corrigido | `c90bb76` | 1 MB sem Content-Length → 413 (Node e workerd) |
+| M2 Timestamp | ✅ Corrigido | `68e9c07` | Assinatura válida de 2 anos atrás → 401 |
+| M3 Idempotência | 📐 Projetado | — | [`idempotencia-fase2.md`](idempotencia-fase2.md); implementação na FASE 2 |
+| M4 Negado por padrão | ✅ Corrigido | `f8f7d71` | Comando sem `ownerOnly` bloqueia estranhos |
+| M5 Respostas adiadas | ✅ Implementado | `183261f` | type 5, depois PATCH em `@original` |
+| M6 Observabilidade | ✅ Corrigido | `c8d82b6` | Log JSON por interação, sem token, também no workerd |
+| B1 Bytes brutos | ✅ Corrigido | `c90bb76` | Teste com acentos e emoji |
+| B2 Cache global | ✅ Removido | `c90bb76` | — |
+| B3 Erros | ✅ Corrigido | `c8d82b6` | Falha ao ler o corpo → 500 limpo e log |
+| B4 Rate limit do registro | ✅ Corrigido | `52939be` | `retry_after` e parada em 401 |
+| B5 Bulk overwrite | ✅ Corrigido | `52939be` | Plano com GET e `--yes` para remoções |
+| B6 `secrets.required` | ✅ Corrigido | `c8d82b6` | `deploy --dry-run` válido |
+| B7 Token no Worker local | ✅ Resolvido de quebra | `c8d82b6` | Com `secrets.required`, o `wrangler dev` carrega só os segredos listados |
+
+### O que os testes revelaram durante as correções
+
+1. **Condição de corrida nos comandos adiados.** Se o trabalho termina muito rápido, a edição de `@original` pode chegar ao Discord antes de ele terminar de processar a resposta "pensando...", e ele responde 404. Correção: num 404, esperar 1 s e tentar **uma** vez de novo.
+2. **Teste de 413 intermitente no workerd.** Quando o Worker responde 413 e para de ler, às vezes a conexão é encerrada antes de o cliente de teste ler a resposta. Isso é comportamento HTTP esperado, não defeito. O teste passou a conferir o que importa (o Worker registrou `body_too_large`) e ficou estável em 6 execuções seguidas.
+3. **Teste antigo ajustado (M4).** O teste "erro dentro de um comando" usava um comando sem `ownerOnly` executado por um não proprietário. Com o novo padrão, ele seria bloqueado antes de chegar ao erro. O teste passou a rodar como proprietário e manteve o mesmo objetivo.
+
+### Pendências
+
+- **Validação contra o Discord real:** depende das suas credenciais (passos 5.1 a 5.6 do README). Isso inclui o fluxo adiado, testado com `fetch` simulado, mas não contra a API real.
+- **M3 (idempotência):** implementar junto com o D1, na FASE 2.
+- **Risco residual da cota diária:** exige WAF ou rate limiting num domínio próprio, fora do escopo.

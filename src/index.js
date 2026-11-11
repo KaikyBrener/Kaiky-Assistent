@@ -6,6 +6,8 @@
 //
 // Fluxo de uma interação:
 //   Discord → POST / → lê corpo (máx. 64 KB) → valida assinatura → JSON → handler → resposta
+//
+// A cada 5 minutos o Cron chama `scheduled` (lembretes e relatório diário).
 
 import { getConfig, ConfigError } from './config/env.js';
 import { verifyDiscordSignature } from './discord/verifySignature.js';
@@ -13,6 +15,7 @@ import { readBodyWithLimit, BodyTooLargeError } from './discord/readBody.js';
 import { handleInteraction } from './events/interactionHandler.js';
 import { json, text } from './discord/responses.js';
 import { logger, errorFields } from './services/logger.js';
+import { runScheduledJobs } from './jobs/index.js';
 
 const MAX_BODY_BYTES = 64 * 1024; // interações reais têm poucos KB
 
@@ -29,6 +32,18 @@ export default {
     } catch (error) {
       logger.error('unhandled_error', errorFields(error));
       return json({ error: 'Erro interno.' }, 500);
+    }
+  },
+
+  /**
+   * Chamado pelo Cron Trigger (wrangler.jsonc → triggers.crons), em UTC.
+   * @param {ScheduledController} controller `scheduledTime` = horário previsto (ms)
+   */
+  async scheduled(controller, env, ctx) {
+    try {
+      await runScheduledJobs(env, controller.scheduledTime);
+    } catch (error) {
+      logger.error('unhandled_error', errorFields(error));
     }
   },
 };

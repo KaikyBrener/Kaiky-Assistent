@@ -24,14 +24,36 @@ export function pong() {
 }
 
 /**
+ * Monta o conteúdo de uma mensagem do bot.
+ * Usado tanto na resposta imediata quanto na edição de uma resposta adiada.
+ * @param {string} content Texto da mensagem (máx. 2000 caracteres no Discord).
+ */
+export function messageData(content) {
+  return {
+    content: String(content).slice(0, 2000),
+    // Evita que o bot mencione @everyone/@here ou pessoas por acidente.
+    allowed_mentions: { parse: [] },
+  };
+}
+
+/**
  * Responde à interação com uma mensagem no canal.
  * @param {string} content Texto da mensagem (máx. 2000 caracteres no Discord).
  * @param {{ ephemeral?: boolean }} [options]
  */
 export function reply(content, { ephemeral = false } = {}) {
-  const data = { content: String(content).slice(0, 2000) };
+  const data = messageData(content);
   if (ephemeral) data.flags = MessageFlags.EPHEMERAL;
-  // Evita que o bot mencione @everyone/@here ou pessoas por acidente.
-  data.allowed_mentions = { parse: [] };
   return json({ type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE, data });
+}
+
+/**
+ * Resposta "adiada": o Discord mostra "Kaiky Assistant está pensando..."
+ * e nos dá até 15 minutos para editar a mensagem com o resultado.
+ * O único flag permitido aqui é EPHEMERAL.
+ */
+export function deferredReply({ ephemeral = false } = {}) {
+  const body = { type: InteractionResponseType.DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE };
+  if (ephemeral) body.data = { flags: MessageFlags.EPHEMERAL };
+  return json(body);
 }

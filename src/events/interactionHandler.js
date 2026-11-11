@@ -3,7 +3,8 @@
 import { InteractionType } from '../config/constants.js';
 import { findCommand } from '../commands/index.js';
 import { isOwner, isOwnerOnly } from '../services/authService.js';
-import { json, pong, reply } from '../discord/responses.js';
+import { json, pong, reply, deferredReply, messageData } from '../discord/responses.js';
+import { editOriginalResponse } from '../discord/followup.js';
 import { logger, errorFields } from '../services/logger.js';
 
 const GENERIC_ERROR = '⚠️ Ocorreu um erro ao executar este comando. Tente novamente.';
@@ -78,6 +79,9 @@ export async function runCommand(command, interaction, context) {
     });
   }
 
+  // Comando demorado: responde já com "pensando..." e termina em segundo plano.
+  if (command.deferred) return startDeferred(command, interaction, context);
+
   try {
     const response = await command.execute(interaction, context);
     // Um comando precisa devolver um Response; qualquer outra coisa é bug.
@@ -90,5 +94,42 @@ export async function runCommand(command, interaction, context) {
     setOutcome(context, 'error');
     logger.error('command_failed', { command: name, interaction_id: interaction.id, ...errorFields(error) });
     return reply(GENERIC_ERROR, { ephemeral: true });
+  }
+}
+
+/**
+ * Comandos adiados (`deferred: true`).
+ *
+ * O Discord exige uma resposta em até 3 segundos. Para trabalhos mais longos:
+ *   1. respondemos NA HORA com DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE (type 5);
+ *   2. `ctx.waitUntil()` mantém o Worker vivo depois da resposta (até 30 s);
+ *   3. quando o trabalho termina, editamos a mensagem "pensando..." com o resultado.
+ *
+ * Num comando adiado, `execute` devolve o TEXTO da resposta (não um Response).
+ */
+function startDeferred(command, interaction, context) {
+  if (context.meta) context.meta.deferred = true;
+  context.ctx.waitUntil(finishDeferred(command, interaction, context));
+  return deferredReply({ ephemeral: command.ephemeral === true });
+}
+
+async function finishDeferred(command, interaction, context) {
+  const name = command.data.name;
+  let content;
+  try {
+    content = await command.execute(interaction, context);
+    if (typeof content !== 'string') throw new TypeError(`/${name} adiado deve devolver texto.`);
+  } catch (error) {
+    logger.error('command_failed', { command: name, interaction_id: interaction.id, deferred: true, ...errorFields(error) });
+    content = GENERIC_ERROR;
+  }
+
+  try {
+    const result = await editOriginalResponse(interaction.application_id, interaction.token, messageData(content));
+    if (!result.ok) {
+      logger.error('followup_failed', { command: name, interaction_id: interaction.id, http_status: result.status });
+    }
+  } catch (error) {
+    logger.error('followup_failed', { command: name, interaction_id: interaction.id, ...errorFields(error) });
   }
 }

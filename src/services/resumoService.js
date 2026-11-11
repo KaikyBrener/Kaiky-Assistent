@@ -59,6 +59,26 @@ export function montarPainel(r, agora) {
   return juntarComLimite('📊 **Painel do Kaiky Assistant**', linhas);
 }
 
+/**
+ * Mensagem fixa do #dashboard: tarefas pendentes e bugs abertos.
+ * Cada parte tem seu próprio "orçamento" de caracteres para caber nos 2000.
+ */
+export function montarDashboard({ tarefas, totalTarefas, atrasadas, bugs, totalBugs }, agora) {
+  const cabecalho = `📌 **Pendências** · atualizado em ${formatShort(agora)} (a cada 5 min)`;
+
+  const tituloTarefas = `\n📋 **Tarefas pendentes: ${totalTarefas}**${atrasadas ? ` · ⚠️ ${atrasadas} atrasada(s)` : ''}`;
+  const parteTarefas = tarefas.length
+    ? juntarComLimite(tituloTarefas, tarefas.map((t) => `• ${formatarTarefa(t, agora)}`).concat(totalTarefas > tarefas.length ? [`… e mais ${totalTarefas - tarefas.length}.`] : []), 1150)
+    : `${tituloTarefas}\n✅ Nenhuma tarefa pendente.`;
+
+  const tituloBugs = `\n🐛 **Bugs abertos: ${totalBugs}**`;
+  const parteBugs = bugs.length
+    ? juntarComLimite(tituloBugs, bugs.map((b) => `• **#${b.id}** · ${escapeMarkdown(b.sistema)} · ${escapeMarkdown(b.titulo)}`).concat(totalBugs > bugs.length ? [`… e mais ${totalBugs - bugs.length}.`] : []), 600)
+    : `${tituloBugs}\n✅ Nenhum bug aberto.`;
+
+  return [cabecalho, parteTarefas, parteBugs].join('\n');
+}
+
 /** Uma mensagem com os lembretes de uma execução do Cron. */
 export function montarLembretes(tarefas, agora) {
   const linhas = tarefas.map((t) => {

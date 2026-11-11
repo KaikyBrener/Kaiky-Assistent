@@ -177,7 +177,8 @@ describe('Configuração', () => {
     const agora = em(8, 0);
     await novaTarefa({ prazo: agora + 10 * MIN, agora });
     const resultado = await runScheduledJobs({ DB: d1.db, DISCORD_WEBHOOK_URL: 'https://exemplo.com/x' }, agora);
-    assert.deepEqual(resultado, { lembretes: 'nao_configurado', relatorio: 'nao_configurado' });
+    // O #dashboard (opcional) também aparece no resultado; aqui ele não está configurado.
+    assert.deepEqual(resultado, { lembretes: 'nao_configurado', relatorio: 'nao_configurado', dashboard: 'nao_configurado' });
     assert.equal((await d1.db.prepare('SELECT COUNT(*) AS n FROM notificacoes').first()).n, 0);
     assert.ok(logs.some((l) => l.includes('webhook_url_invalid')));
   });

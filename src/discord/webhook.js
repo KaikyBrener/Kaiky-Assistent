@@ -24,16 +24,30 @@ export function isValidWebhookUrl(url) {
  * @param {string} webhookUrl
  * @param {string} content texto da mensagem (cortado em 2000 caracteres)
  * @param {{ fetchImpl?: typeof fetch }} [options]
- * @returns {Promise<{ ok: boolean, status: number }>}
+ * @returns {Promise<{ ok: boolean, status: number, messageId?: string }>}
+ *          `messageId` = ID da mensagem criada (usado pelo #dashboard para editá-la depois)
  */
 export async function sendWebhookMessage(webhookUrl, content, { fetchImpl = fetch } = {}) {
   if (!isValidWebhookUrl(webhookUrl)) return { ok: false, status: 0 };
-
   // wait=true: o Discord só responde depois de criar a mensagem, então
   // sabemos com certeza se ela foi enviada (sem isso, falhas passam caladas).
-  const url = `${webhookUrl.trim()}?wait=true`;
+  return webhookRequest(`${webhookUrl.trim()}?wait=true`, 'POST', content, fetchImpl);
+}
+
+/**
+ * Edita uma mensagem que ESTE webhook enviou antes (o #dashboard usa isso
+ * para atualizar sempre a mesma mensagem em vez de criar uma nova).
+ * Endpoint: PATCH /webhooks/{id}/{token}/messages/{message_id}
+ * Status 404 = a mensagem foi apagada (ou é de outro webhook).
+ */
+export async function editWebhookMessage(webhookUrl, messageId, content, { fetchImpl = fetch } = {}) {
+  if (!isValidWebhookUrl(webhookUrl) || !/^\d{17,20}$/.test(String(messageId))) return { ok: false, status: 0 };
+  return webhookRequest(`${webhookUrl.trim()}/messages/${messageId}`, 'PATCH', content, fetchImpl);
+}
+
+async function webhookRequest(url, method, content, fetchImpl) {
   const init = {
-    method: 'POST',
+    method,
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(messageData(content)),
   };
@@ -46,6 +60,13 @@ export async function sendWebhookMessage(webhookUrl, content, { fetchImpl = fetc
       response = await fetchImpl(url, init); // uma única nova tentativa
     }
   }
-  if (response.body && !response.bodyUsed) await response.body.cancel();
-  return { ok: response.ok, status: response.status };
+
+  const result = { ok: response.ok, status: response.status };
+  if (response.ok && !response.bodyUsed) {
+    const message = await response.json().catch(() => null);
+    if (typeof message?.id === 'string') result.messageId = message.id;
+  } else if (response.body && !response.bodyUsed) {
+    await response.body.cancel();
+  }
+  return result;
 }

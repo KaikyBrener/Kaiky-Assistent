@@ -28,6 +28,9 @@
   "secrets": {
     "required": ["DISCORD_PUBLIC_KEY", "OWNER_ID", "DISCORD_WEBHOOK_URL", "GITHUB_TOKEN"]
   },
+  // Segredo OPCIONAL (fora da lista acima de propósito, para o deploy não
+  // falhar enquanto você não criar o canal): DISCORD_DASHBOARD_WEBHOOK_URL,
+  // webhook do canal #dashboard. Sem ele, o #dashboard simplesmente não é atualizado.
 
   // Cron Trigger (sempre em UTC): a cada 5 minutos verifica lembretes e,
   // a partir das 08:00 de Brasília, envia o relatório diário (uma vez por dia).

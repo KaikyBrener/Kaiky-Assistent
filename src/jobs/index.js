@@ -5,6 +5,7 @@
 
 import { enviarLembretes } from './lembretes.js';
 import { enviarRelatorioDiario } from './relatorioDiario.js';
+import { atualizarDashboard } from './dashboard.js';
 import { isValidWebhookUrl } from '../discord/webhook.js';
 import { logger, errorFields } from '../services/logger.js';
 
@@ -13,18 +14,27 @@ import { logger, errorFields } from '../services/logger.js';
  * @param {number} agora instante da execução (controller.scheduledTime)
  */
 export async function runScheduledJobs(env, agora) {
-  if (!env?.DB || !isValidWebhookUrl(env?.DISCORD_WEBHOOK_URL)) {
-    // Sem banco ou sem webhook válido não há o que fazer, e NADA é reservado.
-    logger.error('config_invalid', { reason: !env?.DB ? 'd1_binding_missing' : 'webhook_url_invalid' });
-    return { lembretes: 'nao_configurado', relatorio: 'nao_configurado' };
+  if (!env?.DB) {
+    logger.error('config_invalid', { reason: 'd1_binding_missing' });
+    return { lembretes: 'nao_configurado', relatorio: 'nao_configurado', dashboard: 'nao_configurado' };
   }
 
-  // Cada job é independente: a falha de um não impede o outro.
+  // Lembretes e relatório usam o webhook do #kaiky. Sem ele, NADA é reservado.
+  const kaikyOk = isValidWebhookUrl(env.DISCORD_WEBHOOK_URL);
+  if (!kaikyOk) logger.error('config_invalid', { reason: 'webhook_url_invalid' });
+
+  // Cada job é independente: a falha de um não impede os outros.
+  const jobs = [
+    ['lembretes', kaikyOk ? enviarLembretes : null],
+    ['relatorio', kaikyOk ? enviarRelatorioDiario : null],
+    ['dashboard', atualizarDashboard], // opcional: ele mesmo verifica o próprio webhook
+  ];
   const resultado = {};
-  for (const [nome, job] of [
-    ['lembretes', enviarLembretes],
-    ['relatorio', enviarRelatorioDiario],
-  ]) {
+  for (const [nome, job] of jobs) {
+    if (!job) {
+      resultado[nome] = 'nao_configurado';
+      continue;
+    }
     try {
       resultado[nome] = (await job(env, agora)).status;
     } catch (error) {
@@ -33,6 +43,8 @@ export async function runScheduledJobs(env, agora) {
     }
   }
 
-  logger.info('scheduled', { outcome: `lembretes=${resultado.lembretes} relatorio=${resultado.relatorio}` });
+  logger.info('scheduled', {
+    outcome: `lembretes=${resultado.lembretes} relatorio=${resultado.relatorio} dashboard=${resultado.dashboard}`,
+  });
   return resultado;
 }

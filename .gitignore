@@ -1,0 +1,19 @@
+# Dependências
+node_modules/
+
+# Segredos locais — NUNCA versionar
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+.env
+.env.*
+
+# Arquivos gerados pelo Wrangler
+.wrangler/
+
+# Sistema / editores
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.log

@@ -1,0 +1,26 @@
+// Configuração do Worker lida pelo Wrangler (dev local e deploy).
+// Comentários são permitidos porque o formato é JSONC.
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "kaiky-assistant",
+  "main": "src/index.js",
+  "compatibility_date": "2026-11-01",
+
+  // Publica em https://kaiky-assistant.<seu-subdominio>.workers.dev
+  // Nenhuma rota de domínio próprio é configurada: o DNS não é tocado.
+  "workers_dev": true,
+  "preview_urls": false,
+
+  // Variáveis NÃO secretas. Segredos (token, chave pública, IDs) ficam
+  // em .dev.vars (local) e em `wrangler secret put` (produção).
+  "vars": {
+    "APP_NAME": "Kaiky Assistant"
+  },
+
+  "observability": {
+    "enabled": true
+  }
+
+  // FASE 2: aqui entrará o binding do D1 ("d1_databases").
+  // FASE 3: aqui entrarão os Cron Triggers ("triggers": { "crons": [...] }).
+}

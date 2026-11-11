@@ -1,0 +1,17 @@
+# Copie este arquivo para ".dev.vars" e preencha com os seus valores.
+# O ".dev.vars" está no .gitignore e nunca deve ir para o Git.
+
+# Developer Portal > sua aplicação > General Information > Public Key
+DISCORD_PUBLIC_KEY=""
+
+# Developer Portal > General Information > Application ID
+DISCORD_APPLICATION_ID=""
+
+# Developer Portal > Bot > Reset Token (usado só pelo script de registro de comandos)
+DISCORD_TOKEN=""
+
+# Seu ID de usuário do Discord (Modo Desenvolvedor > clique direito no seu nome > Copiar ID)
+OWNER_ID=""
+
+# ID do seu servidor de testes (comandos de servidor atualizam na hora)
+DISCORD_GUILD_ID=""

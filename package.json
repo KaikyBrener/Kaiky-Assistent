@@ -1,0 +1,25 @@
+{
+  "name": "kaiky-assistant",
+  "version": "0.1.0",
+  "description": "Kaiky Assistant — assistente pessoal no Discord via Interactions HTTP, hospedado no Cloudflare Workers.",
+  "private": true,
+  "type": "module",
+  "main": "src/index.js",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "check": "wrangler deploy --dry-run --outdir .wrangler/dry-run",
+    "test": "node --test \"test/**/*.test.js\"",
+    "register": "node --env-file=.dev.vars scripts/register-commands.js",
+    "register:global": "node --env-file=.dev.vars scripts/register-commands.js --global",
+    "test:local": "node scripts/smoke-test.js"
+  },
+  "author": "Kaiky Brener",
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "wrangler": "^4.160.0"
+  }
+}

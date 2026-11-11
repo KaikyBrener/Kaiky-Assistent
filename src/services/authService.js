@@ -10,6 +10,15 @@ export function getUserId(interaction) {
 }
 
 /**
+ * Regra "negado por padrão": todo comando é restrito ao proprietário,
+ * a não ser que declare explicitamente `ownerOnly: false`.
+ * Assim, esquecer a propriedade nunca deixa dados pessoais abertos.
+ */
+export function isOwnerOnly(command) {
+  return command?.ownerOnly !== false;
+}
+
+/**
  * Verdadeiro somente se o usuário for o proprietário configurado em OWNER_ID.
  * Se OWNER_ID não estiver configurado, retorna false (falha fechada).
  */

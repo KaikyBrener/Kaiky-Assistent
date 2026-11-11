@@ -2,7 +2,7 @@
 
 import { InteractionType } from '../config/constants.js';
 import { findCommand } from '../commands/index.js';
-import { isOwner } from '../services/authService.js';
+import { isOwner, isOwnerOnly } from '../services/authService.js';
 import { json, pong, reply } from '../discord/responses.js';
 
 /**
@@ -52,7 +52,7 @@ async function handleCommand(interaction, context) {
 export async function runCommand(command, interaction, context) {
   const name = command.data.name;
 
-  if (command.ownerOnly && !isOwner(interaction, context.config)) {
+  if (isOwnerOnly(command) && !isOwner(interaction, context.config)) {
     return reply('🔒 Este comando é restrito ao proprietário do Kaiky Assistant.', {
       ephemeral: true,
     });

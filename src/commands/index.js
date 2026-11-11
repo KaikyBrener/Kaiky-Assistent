@@ -8,6 +8,7 @@
 // duplicação: definição e execução ficam sempre juntas.
 
 import ping from './central/ping.js';
+import { isOwnerOnly } from '../services/authService.js';
 
 export const commands = [ping];
 
@@ -18,7 +19,18 @@ export function findCommand(name) {
   return byName.get(name) ?? null;
 }
 
-/** Definições no formato que a API do Discord espera no registro. */
-export function getCommandDefinitions() {
-  return commands.map((command) => ({ type: 1, ...command.data }));
+/**
+ * Definições no formato que a API do Discord espera no registro.
+ *
+ * Comandos restritos ao proprietário ganham `default_member_permissions: "0"`:
+ * o Discord passa a esconder o comando de quem não é administrador do servidor.
+ * É uma camada EXTRA: a proteção principal continua sendo a checagem no Worker,
+ * porque administradores do servidor ainda enxergam o comando.
+ */
+export function getCommandDefinitions(list = commands) {
+  return list.map((command) => {
+    const definition = { type: 1, ...command.data };
+    if (isOwnerOnly(command)) definition.default_member_permissions = '0';
+    return definition;
+  });
 }

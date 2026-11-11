@@ -191,7 +191,8 @@ describe('Permissões de proprietário', () => {
     const original = console.error;
     console.error = () => {}; // silencia o log esperado durante o teste
     try {
-      const res = await runCommand(broken, commandInteraction('quebrado'), { config });
+      // Executado pelo dono: comandos sem `ownerOnly` agora são restritos por padrão.
+      const res = await runCommand(broken, commandInteraction('quebrado', OWNER), { config });
       const data = await res.json();
       assert.equal(res.status, 200);
       assert.match(data.data.content, /Ocorreu um erro/);

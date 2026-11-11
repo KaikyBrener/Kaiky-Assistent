@@ -2,7 +2,8 @@
 //
 // Todo comando segue o mesmo formato:
 //   data     → definição enviada ao Discord no registro (nome, descrição, opções)
-//   ownerOnly → se true, só o proprietário (OWNER_ID) pode usar
+//   ownerOnly → por padrão TODO comando é só do proprietário (OWNER_ID).
+//               Use `ownerOnly: false` apenas em comandos inofensivos, como este.
 //   execute  → função que recebe a interação e devolve a resposta
 
 import { reply } from '../../discord/responses.js';

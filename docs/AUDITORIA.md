@@ -207,7 +207,7 @@ Cada etapa vira um commit próprio, com os testes rodando antes do próximo.
 |---|---|---|---|
 | M1 Limite de corpo | ✅ Corrigido | `c90bb76` | 1 MB sem Content-Length → 413 (Node e workerd) |
 | M2 Timestamp | ✅ Corrigido | `68e9c07` | Assinatura válida de 2 anos atrás → 401 |
-| M3 Idempotência | 📐 Projetado | — | [`idempotencia-fase2.md`](idempotencia-fase2.md); implementação na FASE 2 |
+| M3 Idempotência | ✅ Implementado na FASE 2 | branch `fase-2` | Mesma interação 2× → 1 linha no D1 (teste no workerd) |
 | M4 Negado por padrão | ✅ Corrigido | `f8f7d71` | Comando sem `ownerOnly` bloqueia estranhos |
 | M5 Respostas adiadas | ✅ Implementado | `183261f` | type 5, depois PATCH em `@original` |
 | M6 Observabilidade | ✅ Corrigido | `c8d82b6` | Log JSON por interação, sem token, também no workerd |
@@ -227,6 +227,6 @@ Cada etapa vira um commit próprio, com os testes rodando antes do próximo.
 
 ### Pendências
 
-- **Validação contra o Discord real:** depende das suas credenciais (passos 5.1 a 5.6 do README). Isso inclui o fluxo adiado, testado com `fetch` simulado, mas não contra a API real.
-- **M3 (idempotência):** implementar junto com o D1, na FASE 2.
+- **Validação contra o Discord real:** ✅ feita em 11/11/2026 (`/ping` respondeu em produção). O fluxo adiado foi testado com `fetch` simulado, mas ainda não contra a API real, porque nenhum comando o usa por enquanto.
+- **M3 (idempotência):** ✅ implementada na FASE 2.
 - **Risco residual da cota diária:** exige WAF ou rate limiting num domínio próprio, fora do escopo.

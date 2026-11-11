@@ -3,8 +3,9 @@
 Assistente pessoal no Discord, hospedado de graça no **Cloudflare Workers**, usando **Discord Interactions via HTTP** (sem `client.login()`, sem Gateway, sem servidor ligado 24h).
 
 **Status:**
-- **FASE 1 (Fundação):** concluída. Endpoint HTTP, validação Ed25519 e comando `/ping`.
+- **FASE 1 (Fundação):** concluída e validada no Discord real. Endpoint HTTP, validação Ed25519 e `/ping`.
 - **Auditoria técnica:** aplicada. Ver [`docs/AUDITORIA.md`](docs/AUDITORIA.md).
+- **FASE 2 (Banco de dados):** D1 e `/tarefa criar|listar|concluir|excluir`, com anti-duplicidade. Para ativar, siga a [seção 6](#6-fase-2-ativar-o-banco-d1).
 
 ---
 
@@ -60,13 +61,17 @@ kaiky-assistant/
 │   │   └── followup.js           # Edita a resposta de um comando adiado
 │   ├── events/
 │   │   └── interactionHandler.js # Roteia, checa permissão, trata erros, adia comandos
+│   ├── discord/options.js        # Lê subcomandos e opções preenchidas pelo usuário
 │   ├── commands/
 │   │   ├── index.js              # Lista única de comandos (Worker + registro)
-│   │   └── central/ping.js       # /ping
+│   │   ├── central/ping.js       # /ping
+│   │   └── tarefas/tarefa.js     # /tarefa criar|listar|concluir|excluir
 │   ├── services/
 │   │   ├── authService.js        # Quem é o usuário? É o proprietário?
-│   │   └── logger.js             # Logs em JSON com lista permitida de campos
-│   ├── database/                 # FASE 2 (D1)
+│   │   ├── logger.js             # Logs em JSON com lista permitida de campos
+│   │   └── tarefaService.js      # Regras e validação das tarefas
+│   ├── database/
+│   │   └── tarefasRepository.js  # SQL das tarefas (D1)
 │   └── jobs/                     # FASE 3 (Cron)
 ├── scripts/
 │   ├── register-commands.js      # Envia os comandos ao Discord (com plano e confirmação)
@@ -79,7 +84,8 @@ kaiky-assistant/
 ├── docs/
 │   ├── AUDITORIA.md              # Achados da auditoria e correções
 │   └── idempotencia-fase2.md     # Projeto anti-duplicidade para a FASE 2
-├── migrations/                   # FASE 2
+├── migrations/
+│   └── 0001_criar_tarefas.sql    # Estrutura da tabela de tarefas
 ├── wrangler.jsonc                # Configuração do Worker
 ├── .dev.vars.example             # Modelo dos segredos locais
 └── .gitignore
@@ -215,7 +221,67 @@ No painel da Cloudflare (Workers Logs) dá para filtrar por `command`, `outcome`
 
 ---
 
-## 6. Segurança aplicada
+## 6. FASE 2: ativar o banco D1
+
+O código do `/tarefa` está pronto, mas o **banco real** precisa ser criado na **sua** conta Cloudflare. Faça na ordem: a migration roda **antes** do deploy, para a tabela já existir quando o código novo entrar no ar.
+
+**6.1 Baixe o branch da FASE 2**
+```powershell
+git fetch
+git checkout fase-2
+npm install
+```
+
+**6.2 Crie o banco (gratuito)**
+```powershell
+npx wrangler d1 create kaiky-assistant-db
+```
+- Se o Wrangler perguntar se deve adicionar o banco à configuração ("add it on your behalf"), responda **não** (`n`). O `wrangler.jsonc` já tem o bloco pronto, e responder sim criaria um bloco duplicado.
+- Copie o valor de `database_id` (um código no formato `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`).
+
+**6.3 Cole o ID no `wrangler.jsonc`**
+Troque `COLE_AQUI_O_ID_DO_SEU_BANCO` pelo ID copiado. Esse ID não é segredo e pode ir para o GitHub.
+
+**6.4 Crie a tabela no banco real**
+```powershell
+npx wrangler d1 migrations apply kaiky-assistant-db --remote
+```
+Confirme com `y`. O Wrangler lista a migration `0001_criar_tarefas.sql` e faz um backup antes de aplicar.
+
+**6.5 Teste, faça o commit e publique**
+```powershell
+npm run test:all
+git add wrangler.jsonc
+git commit -m "Configura o ID do banco D1"
+git push
+git checkout main
+git merge fase-2
+git push            # o deploy automático publica a FASE 2
+```
+
+**6.6 Registre o novo comando**
+```powershell
+npm run register
+```
+O plano deve mostrar `+ criar /tarefa 🔒` e `= sem mudança /ping`.
+
+**6.7 Use no Discord**
+```
+/tarefa criar titulo:Estudar SQL contexto:pessoal
+/tarefa listar
+/tarefa concluir id:1
+/tarefa excluir id:1
+```
+Todas as respostas são **efêmeras**: só você vê. Quem não for o proprietário recebe 🔒.
+
+Se o `/tarefa` responder "Ocorreu um erro", o motivo mais provável é a migration não ter sido aplicada no banco remoto (passo 6.4). O log em `npx wrangler tail` mostra o detalhe (`command_failed`).
+
+### Anti-duplicidade
+Cada tarefa guarda o ID da interação do Discord que a criou, numa coluna `UNIQUE`. Se a mesma interação chegar duas vezes, o banco recusa a segunda inserção e o bot responde "esta solicitação já tinha sido processada". Detalhes em [`docs/idempotencia-fase2.md`](docs/idempotencia-fase2.md).
+
+---
+
+## 7. Segurança aplicada
 
 - O corpo é lido com **limite real de 64 KB** (stream), mesmo sem `Content-Length`. Acima disso: 413.
 - Assinatura Ed25519 conferida sobre os **bytes exatos** recebidos, **antes** de interpretar o JSON. Falhas: 401.
@@ -225,17 +291,18 @@ No painel da Cloudflare (Workers Logs) dá para filtrar por `command`, `outcome`
 - Logs em JSON com **lista permitida** de campos: o `token` da interação nunca é gravado.
 - Erros internos ficam no log; o usuário recebe só uma mensagem genérica.
 - Respostas com `allowed_mentions: { parse: [] }`: o bot nunca marca @everyone por acidente.
+- Banco: valores do usuário entram só por `.bind(...)`, o que impede SQL injection (há teste com `DROP TABLE` no título). Título e ID são validados no servidor, e a mesma interação nunca cria duas tarefas.
 
 **Risco conhecido:** a URL `workers.dev` é pública. Alguém poderia gastar a cota de 100 mil requisições/dia com chamadas inválidas. Mitigar isso exige regras de WAF num domínio próprio (ou seja, mexer em DNS), o que está fora do escopo. Detalhes em `docs/AUDITORIA.md`.
 
 ---
 
-## 7. Próximas fases
+## 8. Próximas fases
 
-- **FASE 2:** D1, migrations e `/tarefa criar|listar|concluir|excluir`, com anti-duplicidade ([projeto](docs/idempotencia-fase2.md)).
+- **FASE 2:** ✅ implementada. Falta só ativá-la na sua conta (seção 6).
 - **FASE 3:** um único Cron Trigger (limite de 5 por conta) para lembretes e relatório diário.
 - **FASE 4:** GitHub, e-mail próprio, painel, IA (usando `deferred: true`).
 
 Documentação usada:
 - Discord: [Interactions](https://docs.discord.com/developers/interactions/overview) · [Receiving and Responding](https://docs.discord.com/developers/interactions/receiving-and-responding) · [Application Commands](https://docs.discord.com/developers/interactions/application-commands)
-- Cloudflare: [Workers Limits](https://developers.cloudflare.com/workers/platform/limits/) · [Web Crypto](https://developers.cloudflare.com/workers/runtime-apis/web-crypto/) · [Secrets](https://developers.cloudflare.com/workers/configuration/secrets/) · [Test harness](https://developers.cloudflare.com/workers/testing/test-harness/) · [Traces](https://developers.cloudflare.com/workers/observability/traces/)
+- Cloudflare: [Workers Limits](https://developers.cloudflare.com/workers/platform/limits/) · [Web Crypto](https://developers.cloudflare.com/workers/runtime-apis/web-crypto/) · [Secrets](https://developers.cloudflare.com/workers/configuration/secrets/) · [Test harness](https://developers.cloudflare.com/workers/testing/test-harness/) · [Traces](https://developers.cloudflare.com/workers/observability/traces/) · [D1 limits](https://developers.cloudflare.com/d1/platform/limits/)

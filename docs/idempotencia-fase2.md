@@ -1,6 +1,10 @@
 # Projeto: anti-duplicidade (idempotência) na FASE 2
 
-> Status: **projeto**. Nada aqui está implementado ainda, porque depende do D1 (FASE 2).
+> Status: ✅ **implementado** na FASE 2.
+> - Código: `migrations/0001_criar_tarefas.sql` e `src/database/tarefasRepository.js`.
+> - Teste: "a MESMA interação enviada duas vezes cria só UMA tarefa", em `test/runtime/tarefas.runtime.js`, roda no workerd com D1.
+>
+> A implementação seguiu o desenho abaixo, com nomes de colunas ajustados ao código final.
 
 ## O problema, em uma frase
 

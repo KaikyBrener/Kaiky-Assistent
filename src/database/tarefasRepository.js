@@ -8,10 +8,10 @@
 //
 // `db` é o binding D1 (env.DB), configurado no wrangler.jsonc.
 
-const COLUNAS = 'id, titulo, contexto, concluida, criada_em, concluida_em';
+export const COLUNAS = 'id, titulo, contexto, concluida, criada_em, concluida_em, prazo';
 
 /** Converte a linha do banco (0/1) para um objeto mais fácil de usar. */
-function paraTarefa(linha) {
+export function paraTarefa(linha) {
   if (!linha) return null;
   return { ...linha, concluida: linha.concluida === 1 };
 }
@@ -19,16 +19,17 @@ function paraTarefa(linha) {
 /**
  * Cria uma tarefa. Se a mesma interação do Discord chegar de novo,
  * NÃO cria outra: devolve a tarefa já existente com `repetida: true`.
+ * `prazo` é opcional (ms UTC ou null).
  */
-export async function criarTarefa(db, { titulo, contexto, interactionId, agora }) {
+export async function criarTarefa(db, { titulo, contexto, prazo = null, interactionId, agora }) {
   const criada = await db
     .prepare(
-      `INSERT INTO tarefas (titulo, contexto, criada_em, criada_por_interacao)
-       VALUES (?, ?, ?, ?)
+      `INSERT INTO tarefas (titulo, contexto, prazo, criada_em, criada_por_interacao)
+       VALUES (?, ?, ?, ?, ?)
        ON CONFLICT (criada_por_interacao) DO NOTHING
        RETURNING ${COLUNAS}`,
     )
-    .bind(titulo, contexto, agora, interactionId)
+    .bind(titulo, contexto, prazo, agora, interactionId)
     .first();
 
   if (criada) return { tarefa: paraTarefa(criada), repetida: false };

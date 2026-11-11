@@ -10,6 +10,8 @@ import { reply } from '../../discord/responses.js';
 import { readSubcommand } from '../../discord/options.js';
 import { logger } from '../../services/logger.js';
 import * as tarefas from '../../services/tarefaService.js';
+import { escapeMarkdown, formatarTarefa } from '../../services/tarefaFormat.js';
+import { formatDateTime } from '../../services/dateTime.js';
 
 const contextoChoices = tarefas.CONTEXTOS.map((valor) => ({ name: valor, value: valor }));
 
@@ -21,16 +23,8 @@ const idOption = {
   min_value: 1,
 };
 
-/** Evita que *, _, ~, ` etc. do título baguncem a formatação da mensagem. */
-export function escapeMarkdown(texto) {
-  return String(texto).replace(/([\\*_~`|>#[\]()-])/g, '\\$1');
-}
-
-export function formatarTarefa(t) {
-  const marcador = t.concluida ? '✅' : '⬜';
-  const titulo = escapeMarkdown(t.titulo);
-  return `${marcador} **#${t.id}** · ${t.contexto} · ${t.concluida ? `~~${titulo}~~` : titulo}`;
-}
+// A formatação mora em services/tarefaFormat.js (compartilhada com painel e Cron).
+export { escapeMarkdown, formatarTarefa };
 
 export function formatarLista({ tarefas: lista, total }, { contexto, todas }) {
   const filtro = [contexto ?? 'todos os contextos', todas ? 'incluindo concluídas' : 'só pendentes'].join(', ');
@@ -46,10 +40,14 @@ const handlers = {
     const { tarefa, repetida } = await tarefas.criar(db, {
       titulo: values.titulo,
       contexto: values.contexto,
+      prazo: values.prazo,
       interactionId: interaction.id,
     });
     if (repetida) return `ℹ️ Esta solicitação já tinha sido processada: ${formatarTarefa(tarefa)}`;
-    return `✅ Tarefa criada: ${formatarTarefa(tarefa)}`;
+    const aviso = tarefa.prazo
+      ? `\n⏰ Vence em ${formatDateTime(tarefa.prazo)} (horário de Brasília). Você recebe um lembrete no #kaiky até 1 hora antes.`
+      : '';
+    return `✅ Tarefa criada: ${formatarTarefa(tarefa)}${aviso}`;
   },
 
   async listar(db, values) {
@@ -93,6 +91,12 @@ export default {
             name: 'contexto',
             description: 'Pessoal ou profissional (padrão: pessoal).',
             choices: contextoChoices,
+          },
+          {
+            type: OptionType.STRING,
+            name: 'prazo',
+            description: 'Opcional. DD/MM/AAAA HH:MM ou DD/MM/AAAA (horário de Brasília).',
+            max_length: 16,
           },
         ],
       },

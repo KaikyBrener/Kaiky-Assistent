@@ -5,6 +5,7 @@
 // entrada; confira tudo no servidor.
 
 import * as repo from '../database/tarefasRepository.js';
+import { parsePrazo } from './dateTime.js';
 
 export const TITULO_MAX = 200;
 export const CONTEXTOS = Object.freeze(['pessoal', 'profissional']);
@@ -39,11 +40,32 @@ export function validarId(valor) {
   return valor;
 }
 
-export async function criar(db, { titulo, contexto, interactionId, agora = Date.now() }) {
+const UM_MINUTO = 60 * 1000;
+const PRAZO_MAX_ANOS = 5;
+
+/**
+ * Prazo opcional, digitado no horário de Brasília.
+ * Sem valor → null (tarefa sem prazo). Prazo no passado é recusado.
+ */
+export function validarPrazo(valor, agora = Date.now()) {
+  if (valor === undefined || valor === null || valor === '') return null;
+  const prazo = parsePrazo(valor);
+  if (prazo === null) {
+    throw new ValidationError('Prazo inválido. Use DD/MM/AAAA HH:MM (ex.: 15/11/2026 14:30) ou só DD/MM/AAAA.');
+  }
+  if (prazo < agora - UM_MINUTO) throw new ValidationError('Esse prazo já passou.');
+  if (prazo > agora + PRAZO_MAX_ANOS * 365 * 24 * 60 * UM_MINUTO) {
+    throw new ValidationError(`O prazo pode ser de no máximo ${PRAZO_MAX_ANOS} anos.`);
+  }
+  return prazo;
+}
+
+export async function criar(db, { titulo, contexto, prazo, interactionId, agora = Date.now() }) {
   if (typeof interactionId !== 'string' || !interactionId) throw new ValidationError('Interação sem ID.');
   return repo.criarTarefa(db, {
     titulo: validarTitulo(titulo),
     contexto: validarContexto(contexto),
+    prazo: validarPrazo(prazo, agora),
     interactionId,
     agora,
   });

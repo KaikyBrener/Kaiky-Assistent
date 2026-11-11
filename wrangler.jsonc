@@ -37,12 +37,12 @@
   // Banco de dados D1 (SQLite). No código ele aparece como `env.DB`.
   // O `database_id` NÃO é segredo: ele só diz qual banco usar, e sem o
   // token da sua conta ninguém acessa o banco por ele.
-  // Para obter o ID: `npx wrangler d1 create kaiky-assistant-db` (ver README).
+  // Banco criado com `npx wrangler d1 create kaiky-assistant-db` (ver README).
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "kaiky-assistant-db",
-      "database_id": "COLE_AQUI_O_ID_DO_SEU_BANCO",
+      "database_id": "8cfeb3a8-3311-4597-972e-9c533175f0a0",
       "migrations_dir": "migrations"
     }
   ]

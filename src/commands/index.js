@@ -8,9 +8,10 @@
 // duplicação: definição e execução ficam sempre juntas.
 
 import ping from './central/ping.js';
+import tarefa from './tarefas/tarefa.js';
 import { isOwnerOnly } from '../services/authService.js';
 
-export const commands = [ping];
+export const commands = [ping, tarefa];
 
 /** Mapa nome → comando, para achar o comando em O(1) a cada interação. */
 const byName = new Map(commands.map((command) => [command.data.name, command]));

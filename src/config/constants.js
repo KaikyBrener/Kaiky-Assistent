@@ -28,5 +28,13 @@ export const ApplicationCommandType = Object.freeze({
   CHAT_INPUT: 1,
 });
 
+/** Tipos de opção de um comando (o que o usuário preenche). */
+export const OptionType = Object.freeze({
+  SUB_COMMAND: 1,
+  STRING: 3,
+  INTEGER: 4,
+  BOOLEAN: 5,
+});
+
 /** Discord conta o tempo a partir desta data nos IDs (snowflakes). */
 export const DISCORD_EPOCH_MS = 1420070400000n;

@@ -3,19 +3,44 @@
 export const SNOWFLAKE = /^\d{17,20}$/;
 const NAME_RULE = /^[-_ʼ\p{L}\p{N}\p{sc=Deva}\p{sc=Thai}]{1,32}$/u;
 
-/** Confere nome e descrição de cada comando conforme as regras do Discord. */
+/** Confere nome e descrição (comando ou opção) conforme as regras do Discord. */
+function checkNameAndDescription(item, label, errors) {
+  if (typeof item.name !== 'string' || !NAME_RULE.test(item.name) || item.name !== item.name.toLowerCase()) {
+    errors.push(`Nome inválido em ${label}: "${item.name}" (use minúsculas, 1 a 32 caracteres).`);
+  }
+  if (!item.description || item.description.length > 100) {
+    errors.push(`Descrição de ${label} precisa ter de 1 a 100 caracteres.`);
+  }
+}
+
+/** Confere as opções (e subcomandos) de forma recursiva. */
+function checkOptions(options, label, errors) {
+  if (!options) return;
+  if (options.length > 25) errors.push(`${label} tem mais de 25 opções.`);
+  const seen = new Set();
+  let sawOptional = false;
+  for (const option of options) {
+    const optionLabel = `${label} ${option.name}`;
+    checkNameAndDescription(option, optionLabel, errors);
+    if (seen.has(option.name)) errors.push(`Opção repetida em ${label}: "${option.name}".`);
+    seen.add(option.name);
+    // O Discord exige que as opções obrigatórias venham antes das opcionais.
+    if (option.required && sawOptional) errors.push(`Em ${label}, "${option.name}" é obrigatória mas vem depois de uma opcional.`);
+    if (!option.required && option.type !== 1 && option.type !== 2) sawOptional = true;
+    if (option.choices && option.choices.length > 25) errors.push(`${optionLabel} tem mais de 25 escolhas.`);
+    checkOptions(option.options, optionLabel, errors);
+  }
+}
+
+/** Confere comandos e opções conforme as regras do Discord. */
 export function validateDefinitions(definitions) {
   const errors = [];
   const seen = new Set();
   for (const def of definitions) {
-    if (!NAME_RULE.test(def.name) || def.name !== def.name.toLowerCase()) {
-      errors.push(`Nome inválido: "${def.name}" (use minúsculas, 1 a 32 caracteres).`);
-    }
-    if (!def.description || def.description.length > 100) {
-      errors.push(`Descrição de /${def.name} precisa ter de 1 a 100 caracteres.`);
-    }
+    checkNameAndDescription(def, `/${def.name}`, errors);
     if (seen.has(def.name)) errors.push(`Comando /${def.name} aparece duas vezes.`);
     seen.add(def.name);
+    checkOptions(def.options, `/${def.name}`, errors);
   }
   return errors;
 }

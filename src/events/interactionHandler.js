@@ -5,6 +5,7 @@ import { findCommand } from '../commands/index.js';
 import { isOwner, isOwnerOnly } from '../services/authService.js';
 import { json, pong, reply, deferredReply, messageData } from '../discord/responses.js';
 import { editOriginalResponse } from '../discord/followup.js';
+import { parseModalCustomId } from '../discord/modal.js';
 import { logger, errorFields } from '../services/logger.js';
 
 const GENERIC_ERROR = '⚠️ Ocorreu um erro ao executar este comando. Tente novamente.';
@@ -39,8 +40,11 @@ export async function handleInteraction(interaction, context) {
     case InteractionType.APPLICATION_COMMAND:
       return handleCommand(interaction, context);
 
+    case InteractionType.MODAL_SUBMIT:
+      return handleModalSubmit(interaction, context);
+
     default:
-      // Botões, modais etc. chegarão nas próximas fases.
+      // Botões, menus etc. ainda não são usados.
       setOutcome(context, 'rejected', 'unsupported_type');
       return json({ error: 'Tipo de interação não suportado.' }, 400);
   }
@@ -65,11 +69,31 @@ async function handleCommand(interaction, context) {
 }
 
 /**
+ * Envio de um formulário (modal). O custom_id diz qual comando o abriu,
+ * ex.: "tarefa:descrever:12". O comando precisa ter `handleModal`.
+ * As MESMAS regras valem aqui: permissão do proprietário e tratamento de erro.
+ */
+async function handleModalSubmit(interaction, context) {
+  const parsed = parseModalCustomId(interaction.data?.custom_id);
+  const command = parsed ? findCommand(parsed.command) : null;
+  if (!command || typeof command.handleModal !== 'function') {
+    setOutcome(context, 'rejected', 'unknown_modal');
+    return reply('Formulário não reconhecido.', { ephemeral: true });
+  }
+  if (context.meta) context.meta.reason = `modal:${parsed.command}:${parsed.action}`;
+  return runCommand(command, interaction, context, {
+    handler: (i, ctx) => command.handleModal(i, ctx, parsed),
+  });
+}
+
+/**
  * Aplica as regras comuns a todo comando (permissão + tratamento de erro)
  * e então executa. Exportada para poder ser testada isoladamente.
+ * `options.handler` substitui `command.execute` (usado no envio de formulários).
  */
-export async function runCommand(command, interaction, context) {
+export async function runCommand(command, interaction, context, options = {}) {
   const name = command.data.name;
+  const execute = options.handler ?? ((i, ctx) => command.execute(i, ctx));
 
   if (isOwnerOnly(command) && !isOwner(interaction, context.config)) {
     // Se OWNER_ID não estiver configurado, o motivo fica visível nos logs.
@@ -80,10 +104,10 @@ export async function runCommand(command, interaction, context) {
   }
 
   // Comando demorado: responde já com "pensando..." e termina em segundo plano.
-  if (command.deferred) return startDeferred(command, interaction, context);
+  if (command.deferred && !options.handler) return startDeferred(command, interaction, context);
 
   try {
-    const response = await command.execute(interaction, context);
+    const response = await execute(interaction, context);
     // Um comando precisa devolver um Response; qualquer outra coisa é bug.
     if (!(response instanceof Response)) {
       throw new TypeError(`/${name} não devolveu um Response.`);

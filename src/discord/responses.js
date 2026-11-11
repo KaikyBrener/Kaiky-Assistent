@@ -48,6 +48,29 @@ export function reply(content, { ephemeral = false } = {}) {
 }
 
 /**
+ * Responde com um "embed" (cartão). Usado para textos longos: a descrição
+ * de um embed aceita até 4096 caracteres (o texto comum, só 2000).
+ * Aceita um cartão ou uma lista (até 10). Limites do Discord: título 256,
+ * descrição 4096, campo 1024, e 6000 caracteres somando todos os cartões.
+ * @param {object | object[]} embeds { title, description?, fields?: [{ name, value }] }
+ */
+export function replyEmbed(embeds, { ephemeral = false } = {}) {
+  const lista = (Array.isArray(embeds) ? embeds : [embeds]).slice(0, 10);
+  const data = {
+    embeds: lista.map((embed) => ({
+      title: String(embed.title).slice(0, 256),
+      ...(embed.description ? { description: String(embed.description).slice(0, 4096) } : {}),
+      ...(embed.fields?.length
+        ? { fields: embed.fields.slice(0, 25).map((f) => ({ name: String(f.name).slice(0, 256), value: String(f.value).slice(0, 1024) })) }
+        : {}),
+    })),
+    allowed_mentions: { parse: [] },
+  };
+  if (ephemeral) data.flags = MessageFlags.EPHEMERAL;
+  return json({ type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE, data });
+}
+
+/**
  * Resposta "adiada": o Discord mostra "Kaiky Assistant está pensando..."
  * e nos dá até 15 minutos para editar a mensagem com o resultado.
  * O único flag permitido aqui é EPHEMERAL.

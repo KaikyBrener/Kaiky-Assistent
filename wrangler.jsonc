@@ -17,8 +17,21 @@
     "APP_NAME": "Kaiky Assistant"
   },
 
+  // Segredos que o Worker PRECISA ter. Com esta lista:
+  //  - `wrangler deploy` falha com erro claro se algum não estiver configurado;
+  //  - `wrangler dev` carrega do .dev.vars SÓ estes nomes (o DISCORD_TOKEN,
+  //    usado apenas pelo script de registro, não entra no Worker local).
+  "secrets": {
+    "required": ["DISCORD_PUBLIC_KEY", "OWNER_ID"]
+  },
+
+  // Logs e traces no painel da Cloudflare. Plano gratuito: 0,5 GB/dia de
+  // ingestão (logs + traces juntos), 7 dias de retenção, sem cobrança extra.
+  // `enabled` sozinho liga só os logs; traces precisam ser ligados à parte.
   "observability": {
-    "enabled": true
+    "enabled": true,
+    "logs": { "enabled": true, "head_sampling_rate": 1 },
+    "traces": { "enabled": true, "head_sampling_rate": 1 }
   }
 
   // FASE 2: aqui entrará o binding do D1 ("d1_databases").

@@ -1,57 +1,56 @@
 // Registra (ou atualiza) os comandos de barra no Discord.
 //
 // Uso:
-//   npm run register           → registra no seu servidor de testes (atualiza na hora)
-//   npm run register:global    → registra globalmente (todos os servidores/DMs)
-//   node --env-file=.dev.vars scripts/register-commands.js --dry-run
-//                               → só mostra o que seria enviado, sem chamar a API
+//   npm run register            → servidor de testes (atualiza na hora)
+//   npm run register:global     → global (todos os servidores e DMs)
+//   npm run register -- --dry-run   → só mostra o que seria enviado (sem rede, sem token)
+//   npm run register -- --yes       → confirma a REMOÇÃO de comandos que saíram do código
 //
-// Usa o endpoint de "bulk overwrite": a lista enviada SUBSTITUI a lista atual.
-// Comando que não estiver em src/commands/index.js será removido do Discord.
+// ⚠️ "Bulk overwrite": a lista enviada SUBSTITUI a lista atual no Discord.
+// Por isso o script primeiro consulta o que já existe, mostra o plano
+// (criar / atualizar / remover) e, se algo for ser removido, exige --yes.
 // Docs: https://docs.discord.com/developers/interactions/application-commands
 
 import { getCommandDefinitions } from '../src/commands/index.js';
+import { retryDelayMs } from '../src/discord/followup.js';
+import { SNOWFLAKE, validateDefinitions, planCommandChanges, hasChanges } from './lib/commandPlan.js';
 
 const API_BASE = 'https://discord.com/api/v10';
-const NAME_RULE = /^[-_ʼ\p{L}\p{N}\p{sc=Deva}\p{sc=Thai}]{1,32}$/u;
 
 const args = new Set(process.argv.slice(2));
 const isGlobal = args.has('--global');
 const isDryRun = args.has('--dry-run');
+const confirmRemoval = args.has('--yes');
 
 function fail(message) {
   console.error(`✖ ${message}`);
   process.exit(1);
 }
 
-function validateDefinitions(definitions) {
-  for (const def of definitions) {
-    if (!NAME_RULE.test(def.name) || def.name !== def.name.toLowerCase()) {
-      fail(`Nome inválido: "${def.name}" (use minúsculas, 1 a 32 caracteres).`);
-    }
-    if (!def.description || def.description.length > 100) {
-      fail(`Descrição de /${def.name} precisa ter de 1 a 100 caracteres.`);
-    }
-  }
-}
-
+// 1) Valida os comandos e a configuração antes de qualquer chamada à rede.
 const definitions = getCommandDefinitions();
-validateDefinitions(definitions);
+const errors = validateDefinitions(definitions);
+if (errors.length) fail(errors.join('\n  '));
 
 const appId = process.env.DISCORD_APPLICATION_ID?.trim();
 const token = process.env.DISCORD_TOKEN?.trim();
 const guildId = process.env.DISCORD_GUILD_ID?.trim();
 
-if (!appId) fail('DISCORD_APPLICATION_ID não definido no .dev.vars.');
-if (!isGlobal && !guildId) fail('DISCORD_GUILD_ID não definido (ou use --global).');
+if (!appId || !SNOWFLAKE.test(appId)) fail('DISCORD_APPLICATION_ID ausente ou inválido no .dev.vars (esperado: número de 17 a 20 dígitos).');
+if (!isGlobal && (!guildId || !SNOWFLAKE.test(guildId))) {
+  fail('DISCORD_GUILD_ID ausente ou inválido no .dev.vars (ou use --global).');
+}
 
 const url = isGlobal
   ? `${API_BASE}/applications/${appId}/commands`
   : `${API_BASE}/applications/${appId}/guilds/${guildId}/commands`;
+const scope = isGlobal ? 'GLOBAL' : `servidor ${guildId}`;
 
-const scope = isGlobal ? 'global' : `servidor ${guildId}`;
-console.log(`Comandos (${definitions.length}) → ${scope}:`);
-for (const def of definitions) console.log(`  /${def.name} — ${def.description}`);
+console.log(`Comandos no código (${definitions.length}) → destino: ${scope}`);
+for (const def of definitions) {
+  const lock = def.default_member_permissions === '0' ? ' 🔒' : '';
+  console.log(`  /${def.name}${lock} — ${def.description}`);
+}
 
 if (isDryRun) {
   console.log('\n[dry-run] Nada foi enviado. Payload:');
@@ -61,21 +60,55 @@ if (isDryRun) {
 
 if (!token) fail('DISCORD_TOKEN não definido no .dev.vars.');
 
-const response = await fetch(url, {
-  method: 'PUT',
-  headers: {
-    Authorization: `Bot ${token}`, // o token nunca é impresso no terminal
-    'Content-Type': 'application/json',
-  },
-  body: JSON.stringify(definitions),
-});
+/**
+ * Faz uma chamada à API do Discord. Em caso de 429 (rate limit), respeita
+ * `retry_after` e tenta UMA vez de novo. Em 401 para na hora: insistir com um
+ * token inválido conta para o limite de requisições inválidas do Discord.
+ */
+async function discord(method, body) {
+  const init = {
+    method,
+    headers: { Authorization: `Bot ${token}`, 'Content-Type': 'application/json' }, // token nunca é impresso
+    body: body === undefined ? undefined : JSON.stringify(body),
+  };
+  let response = await fetch(url, init);
+  if (response.status === 429) {
+    const wait = retryDelayMs(429, await response.json().catch(() => null));
+    if (wait === null) fail('Rate limit do Discord (429) com espera longa. Tente novamente mais tarde.');
+    console.log(`… rate limit: aguardando ${wait} ms`);
+    await new Promise((r) => setTimeout(r, wait));
+    response = await fetch(url, init);
+  }
+  if (response.ok) return response.json();
 
-if (!response.ok) {
-  const detail = await response.text();
-  if (response.status === 401) fail('Token inválido (401). Gere um novo em Bot > Reset Token.');
-  if (response.status === 403) fail('Sem permissão (403). O bot foi adicionado ao servidor com o escopo applications.commands?');
-  fail(`Discord respondeu ${response.status}: ${detail}`);
+  if (response.status === 401) fail('Token inválido (401). Gere um novo em Bot > Reset Token e NÃO tente de novo com o mesmo.');
+  if (response.status === 403) fail('Sem permissão (403). O app foi adicionado ao servidor com o escopo applications.commands?');
+  if (response.status === 404) fail('Não encontrado (404). Confira DISCORD_APPLICATION_ID e DISCORD_GUILD_ID.');
+  fail(`Discord respondeu ${response.status}: ${await response.text()}`);
 }
 
-const registered = await response.json();
-console.log(`\n✔ ${registered.length} comando(s) registrado(s) com sucesso.`);
+// 2) Consulta o que já está registrado e monta o plano.
+const current = await discord('GET');
+const plan = planCommandChanges(current, definitions);
+
+console.log('\nPlano:');
+for (const name of plan.create) console.log(`  + criar      /${name}`);
+for (const name of plan.update) console.log(`  ~ atualizar  /${name}`);
+for (const name of plan.unchanged) console.log(`  = sem mudança /${name}`);
+for (const name of plan.remove) console.log(`  - REMOVER    /${name}`);
+
+if (!hasChanges(plan)) {
+  console.log('\n✔ Nada a fazer: o Discord já está igual ao código.');
+  process.exit(0);
+}
+
+if (plan.remove.length && !confirmRemoval) {
+  fail(
+    `${plan.remove.length} comando(s) serão REMOVIDOS do Discord porque não estão mais no código.\n` +
+      '  Se é isso mesmo que você quer, rode de novo com --yes  (ex.: npm run register -- --yes)',
+  );
+}
+
+// 3) Envia a lista completa (bulk overwrite).
+const registered = await discord('PUT', definitions);
+console.log(`\n✔ ${registered.length} comando(s) registrado(s) em ${scope}.`);

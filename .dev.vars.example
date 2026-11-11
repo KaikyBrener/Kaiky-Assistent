@@ -17,3 +17,10 @@ OWNER_ID=""
 
 # ID do seu servidor de testes (comandos de servidor atualizam na hora)
 DISCORD_GUILD_ID=""
+
+# FASE 3: webhook do canal privado #kaiky (Editar canal > Integrações > Webhooks > Copiar URL)
+# É um segredo: quem tiver esta URL consegue postar no canal.
+DISCORD_WEBHOOK_URL=""
+
+# FASE 4: token fine-grained do GitHub, SOMENTE LEITURA (Metadata: Read + Issues: Read)
+GITHUB_TOKEN=""
